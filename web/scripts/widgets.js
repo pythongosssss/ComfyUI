@@ -235,7 +235,24 @@ export const ComfyWidgets = {
 		if (inputData[1] && inputData[1].default) {
 			defaultValue = inputData[1].default;
 		}
-		return { widget: node.addWidget("combo", inputName, defaultValue, () => {}, { values: type }) };
+		if (defaultValue && typeof defaultValue === "object" && "data" in defaultValue) {
+			defaultValue = defaultValue.data[0];
+		}
+		const widget = node.addWidget(
+			"combo",
+			inputName,
+			defaultValue,
+			(v) => {
+				if ("data" in v) {
+					widget.value = v.data[0];
+				}
+			},
+			{ values: type }
+		);
+
+		return {
+			widget,
+		};
 	},
 	IMAGEUPLOAD(node, inputName, inputData, app) {
 		const imageWidget = node.widgets.find((w) => w.name === "image");

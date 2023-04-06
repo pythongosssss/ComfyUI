@@ -36,16 +36,27 @@ def add_model_folder_path(folder_name, full_folder_path):
 def get_folder_paths(folder_name):
     return folder_names_and_paths[folder_name][0][:]
 
-def recursive_search(directory):
+def recursive_search(directory, check_image = False):
     result = []
     for root, subdir, file in os.walk(directory, followlinks=True):
         for filepath in file:
             #we os.path,join directory with a blank string to generate a path separator at the end.
-            result.append(os.path.join(root, filepath).replace(os.path.join(directory,''),''))
+            name = os.path.join(root, filepath).replace(os.path.join(directory,''),'')
+            if check_image:
+                image_path = os.path.splitext(filepath)[0] + ".png"
+                if image_path != name:
+                    image_path = os.path.join(root, image_path)
+                    result.append((name, os.path.isfile(image_path)))
+            else:
+                result.append(name)
     return result
 
 def filter_files_extensions(files, extensions):
-    return sorted(list(filter(lambda a: os.path.splitext(a)[-1].lower() in extensions, files)))
+    def f(a, extensions):
+        if isinstance(a, tuple):
+            a = a[0]
+        return os.path.splitext(a)[-1].lower() in extensions
+    return sorted(list(filter(lambda a: f(a, extensions), files)))
 
 
 
@@ -58,12 +69,12 @@ def get_full_path(folder_name, filename):
             return full_path
 
 
-def get_filename_list(folder_name):
+def get_filename_list(folder_name, check_image = False):
     global folder_names_and_paths
     output_list = set()
     folders = folder_names_and_paths[folder_name]
     for x in folders[0]:
-        output_list.update(filter_files_extensions(recursive_search(x), folders[1]))
+        output_list.update(filter_files_extensions(recursive_search(x, check_image), folders[1]))
     return sorted(list(output_list))
 
 

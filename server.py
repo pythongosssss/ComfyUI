@@ -122,7 +122,7 @@ class PromptServer():
         async def view_image(request):
             if "filename" in request.rel_url.query:
                 type = request.rel_url.query.get("type", "output")
-                if type not in ["output", "input", "temp"]:
+                if type not in ["output", "input", "temp", "loras", "checkpoints"]:
                     return web.Response(status=400)
 
                 output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), type)
@@ -133,8 +133,13 @@ class PromptServer():
                     output_dir = full_output_dir
 
                 filename = request.rel_url.query["filename"]
-                filename = os.path.basename(filename)
-                file = os.path.join(output_dir, filename)
+                if type in ["loras", "checkpoints"]:
+                    file = folder_paths.get_full_path(type, filename)
+                    if file is not None:
+                        file = os.path.splitext(file)[0] + ".png"
+                else:
+                    filename = os.path.basename(filename)
+                    file = os.path.join(output_dir, filename)
 
                 if os.path.isfile(file):
                     return web.FileResponse(file, headers={"Content-Disposition": f"filename=\"{filename}\""})

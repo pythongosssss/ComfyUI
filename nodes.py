@@ -207,7 +207,7 @@ class CheckpointLoader:
 class CheckpointLoaderSimple:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "ckpt_name": (folder_paths.get_filename_list("checkpoints"), ),
+        return {"required": { "ckpt_name": (list(map(lambda f: { "title": f[0], "data": f }, folder_paths.get_filename_list("checkpoints"))), ),
                              }}
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
     FUNCTION = "load_checkpoint"
@@ -255,7 +255,7 @@ class LoraLoader:
     def INPUT_TYPES(s):
         return {"required": { "model": ("MODEL",),
                               "clip": ("CLIP", ),
-                              "lora_name": (folder_paths.get_filename_list("loras"), ),
+                              "lora_name": (list(map(lambda f: { "title": f[0], "data": (f[0], "loras" if f[1] else None) }, folder_paths.get_filename_list("loras", True))), ),
                               "strength_model": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
                               "strength_clip": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
                               }}

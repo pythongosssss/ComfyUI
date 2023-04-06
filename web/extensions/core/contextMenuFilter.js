@@ -30,6 +30,39 @@ app.registerExtension({
 				let itemCount = items.length;
 				let selectedItem;
 
+				const gridMode = true;
+
+				if (gridMode) {
+					this.root.style.display = "flex";
+					this.root.style.flexWrap = "wrap";
+				}
+
+				for (let i = 0; i < items.length; i++) {
+					const v = values[i];
+					if ("data" in v && v.data[1]) {
+						Object.assign(items[i].style, {
+							display: "flex",
+							alignItems: "center",
+						});
+						const img = document.createElement("img");
+						img.src = `/view?type=${encodeURIComponent(v.data[1])}&filename=${encodeURIComponent(v.data[0])}`;
+						img.style.width = gridMode ? "100%" : "64px";
+						img.style.height = gridMode ? "100%" : "64px";
+						img.style.objectFit = "cover";
+						items[i].prepend(img);
+					}
+					if (gridMode) {
+						items[i].style.flex = "auto";
+						items[i].style.fontSize = "0px";
+						items[i].style.aspectRatio = "1/1";
+						items[i].style.maxWidth = "33%";
+						items[i].style.margin = "0";
+						items[i].style.padding = "0";
+					} else {
+						items[i].style.gap = "10px";
+					}
+				}
+
 				// Apply highlighting to the selected item
 				function updateSelected() {
 					if (selectedItem) {
@@ -52,7 +85,7 @@ app.registerExtension({
 						const shift = (this.root.clientHeight * scale) / 2;
 						this.root.style.top = -shift + "px";
 					}
-				}
+				};
 
 				updateSelected();
 
@@ -76,7 +109,7 @@ app.registerExtension({
 						e.preventDefault();
 					} else if ((selectedItem && e.key === "Enter") || e.keyCode === 13 || e.keyCode === 10) {
 						selectedItem.click();
-					} else if(e.key === "Escape") {
+					} else if (e.key === "Escape") {
 						this.close();
 					}
 				});
@@ -91,7 +124,7 @@ app.registerExtension({
 					for (const item of items) {
 						const visible = !term || item.textContent.toLocaleLowerCase().includes(term);
 						if (visible) {
-							item.style.display = "block";
+							item.style.display = "flex";
 							if (item === selectedItem) {
 								selectedIndex = visibleItems.length;
 							}
