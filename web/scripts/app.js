@@ -837,6 +837,7 @@ class ComfyApp {
 				{
 					title: nodeData.display_name || nodeData.name,
 					comfyClass: nodeData.name,
+					nodeData,
 				}
 			);
 			node.prototype.comfyClass = nodeData.name;
@@ -957,17 +958,32 @@ class ComfyApp {
 	 * Converts the current graph workflow for sending to the API
 	 * @returns The workflow and node links
 	 */
-	async graphToPrompt() {
+	async graphToPrompt({ repeatIndexes } = {}) {
 		const workflow = this.graph.serialize();
 		const output = {};
+		const multiNodes = {};
+		const repeats = [];
 		// Process nodes in order of execution
-		for (const node of this.graph.computeExecutionOrder(false)) {
-			const n = workflow.nodes.find((n) => n.id === node.id);
+		for (const outerNode of this.graph.computeExecutionOrder(false)) {
+			// Allow a single node to represent multiple
+			let expandedNodes;
 
+			if (outerNode.getInnerNodes) {
+				expandedNodes = outerNode.getInnerNodes();
+				multiNodes[outerNode.id] = expandedNodes;
+			} else {
+				expandedNodes = [outerNode];
+			}
+
+			const n = workflow.nodes.find((n) => n.id === outerNode.id);
+			for (const node of expandedNodes) {
+				if (node.getRepeatCount) {
+					repeats.push(node.getRepeatCount());
+				}
 			if (node.isVirtualNode) {
 				// Don't serialize frontend only nodes but let them make changes
 				if (node.applyToGraph) {
-					node.applyToGraph(workflow);
+						node.applyToGraph(workflow, repeatIndexes ? repeatIndexes.shift() : 0);
 				}
 				continue;
 			}
@@ -993,8 +1009,9 @@ class ComfyApp {
 			// Store all node links
 			for (let i in node.inputs) {
 				let parent = node.getInputNode(i);
-				if (parent) {
-					let link = node.getInputLink(i);
+					let link;
+					if (parent?.isVirtualNode) {
+						link = node.getInputLink(i);
 					while (parent && parent.isVirtualNode) {
 						link = parent.getInputLink(link.origin_slot);
 						if (link) {
@@ -1007,6 +1024,22 @@ class ComfyApp {
 					if (link) {
 						inputs[node.inputs[i].name] = [String(link.origin_id), parseInt(link.origin_slot)];
 					}
+					} else {
+						link = node.getInputLink(i);
+						// If we are a multinode we need to map the links to the underlying nodes
+						if (link && link.origin_id in multiNodes) {
+							const nodes = multiNodes[link.origin_id];
+							for (const n of nodes) {
+								const out = n.outputs.findIndex((o) => o.links && o.links.find((l) => l === link.id));
+								if (out !== -1) {
+									link = { origin_id: n.id, origin_slot: out };
+									break;
+								}
+							}
+						}
+					}
+					if (link) {
+						inputs[node.inputs[i].name] = [String(link.origin_id), parseInt(link.origin_slot)];
 				}
 			}
 
@@ -1015,20 +1048,19 @@ class ComfyApp {
 				class_type: node.comfyClass,
 			};
 		}
+		}
 
 		// Remove inputs connected to removed nodes
 
 		for (const o in output) {
 			for (const i in output[o].inputs) {
-				if (Array.isArray(output[o].inputs[i])
-					&& output[o].inputs[i].length === 2
-					&& !output[output[o].inputs[i][0]]) {
+				if (Array.isArray(output[o].inputs[i]) && output[o].inputs[i].length === 2 && !output[output[o].inputs[i][0]]) {
 					delete output[o].inputs[i];
 				}
 			}
 		}
 
-		return { workflow, output };
+		return { workflow, output, repeats };
 	}
 
 	async queuePrompt(number, batchCount = 1) {
@@ -1039,20 +1071,57 @@ class ComfyApp {
 			return;
 		}
 	
+		function generatePermutations(input, currentIndex = 0, currentPermutation = []) {
+			if (currentIndex === input.length) {
+				return [currentPermutation];
+			}
+
+			const currentLength = input[currentIndex];
+			const permutations = [];
+			for (let i = 0; i < currentLength; i++) {
+				const newPermutation = currentPermutation.slice();
+				newPermutation.push(i);
+				permutations.push(...generatePermutations(input, currentIndex + 1, newPermutation));
+			}
+
+			return permutations;
+		}
+
 		this.#processingQueue = true;
 		try {
 			while (this.#queueItems.length) {
 				({ number, batchCount } = this.#queueItems.pop());
 
 				for (let i = 0; i < batchCount; i++) {
-					const p = await this.graphToPrompt();
+					let repeats = null;
+					let repeatIndex = 0;
+					let p;
+					do {
+						console.log("Generating repeat", repeatIndex, "of", repeats ? repeats.length : "?");
+						p = await this.graphToPrompt({ repeatIndexes: repeats?.[repeatIndex] });
+						if (repeats === null) {
+							if (p.repeats) {
+								repeats = generatePermutations(p.repeats);
 
-					try {
-						await api.queuePrompt(number, p);
-					} catch (error) {
-						this.ui.dialog.show(error.response || error.toString());
-						break;
-					}
+								if (
+									repeats.length > 20 &&
+									!confirm(`You are about to queue ${repeats.length} prompts, are you sure you want to do this?`)
+								) {
+									break;
+								}
+							} else {
+								repeats = [];
+							}
+						}
+						delete p.repeats;
+
+						try {
+							await api.queuePrompt(number, p);
+						} catch (error) {
+							this.ui.dialog.show(error.response || error.toString());
+							break;
+						}
+					} while (++repeatIndex < repeats.length);
 
 					for (const n of p.workflow.nodes) {
 						const node = graph.getNodeById(n.id);

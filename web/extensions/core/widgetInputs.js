@@ -101,7 +101,8 @@ app.registerExtension({
 							callback: () => convertToWidget(this, w),
 						});
 					} else {
-						const config = nodeData?.input?.required[w.name] || nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
+						const config = nodeData?.input?.required[w.name] ||
+							nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
 						if (isConvertableWidget(w, config)) {
 							toInput.push({
 								content: `Convert ${w.name} to input`,
@@ -134,7 +135,7 @@ app.registerExtension({
 						if (w) {
 							hideWidget(this, w);
 						} else {
-							convertToWidget(this, input)
+							convertToWidget(this, input);
 						}
 					}
 				}
@@ -185,13 +186,20 @@ app.registerExtension({
 	},
 	registerCustomNodes() {
 		class PrimitiveNode {
+			#addWidget;
+			#hasRandomize = false;
+
 			constructor() {
 				this.addOutput("connect to widget input", "*");
 				this.serialize_widgets = true;
 				this.isVirtualNode = true;
 			}
 
-			applyToGraph() {
+			getRepeatCount() {
+				return this.widgets.length - this.#hasRandomize;
+			}
+
+			applyToGraph(_, repeatNumber) {
 				if (!this.outputs[0].links?.length) return;
 
 				// For each output link copy our value over the original widget value
@@ -203,7 +211,7 @@ app.registerExtension({
 					if (widgetName) {
 						const widget = node.widgets.find((w) => w.name === widgetName);
 						if (widget) {
-							widget.value = this.widgets[0].value;
+							widget.value = this.widgets[repeatNumber || 0].value;
 							if (widget.callback) {
 								widget.callback(widget.value, app.canvas, node, app.canvas.graph_mouse, {});
 							}
@@ -240,6 +248,33 @@ app.registerExtension({
 				}
 			}
 
+			getExtraMenuOptions(_, options) {
+				if (this.widgets.length) {
+					if (this.widgets[0].type === "combo") {
+						options.push({
+							content: "Add all values",
+							callback: () => {
+								for (const v of this.widgets[0].options.values) {
+									if (v !== this.widgets[0].value) {
+										this.#addWidget(false, v);
+									}
+								}
+							},
+						});
+					}
+					options.push(
+						{
+							content: "Add additional value",
+							callback: () => {
+								this.#addWidget();
+							},
+						},
+						null
+					);
+				}
+				return [];
+			}
+
 			#onFirstConnection() {
 				// First connection can fire before the graph is ready on initial load so random things can be missing
 				const linkId = this.outputs[0].links[0];
@@ -260,10 +295,11 @@ app.registerExtension({
 				this.outputs[0].name = type;
 				this.outputs[0].widget = widget;
 
-				this.#createWidget(widget.config, theirNode, widget.name);
+				this.#addWidget = (first, value) => this.#createWidget(widget.config, theirNode, widget.name, first, value);
+				this.#addWidget(true);
 			}
 
-			#createWidget(inputData, node, widgetName) {
+			#createWidget(inputData, node, widgetName, first, value) {
 				let type = inputData[0];
 
 				if (type instanceof Array) {
@@ -277,15 +313,19 @@ app.registerExtension({
 					widget = this.addWidget(type, "value", null, () => {}, {});
 				}
 
-				if (node?.widgets && widget) {
-					const theirWidget = node.widgets.find((w) => w.name === widgetName);
-					if (theirWidget) {
-						widget.value = theirWidget.value;
+				if (widget) {
+					if (value) {
+						widget.value = value;
+					} else if (node?.widgets && widget) {
+						const theirWidget = node.widgets.find((w) => w.name === widgetName);
+						if (theirWidget) {
+							widget.value = theirWidget.value;
+						}
 					}
 				}
-
-				if (widget.type === "number") {
+				if (first && widget.type === "number") {
 					addRandomizeWidget(this, widget, "Random after every gen");
+					this.#hasRandomize = true;
 				}
 
 				// When our value changes, update other widgets to reflect our changes
