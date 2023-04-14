@@ -250,6 +250,14 @@ app.registerExtension({
 
 			getExtraMenuOptions(_, options) {
 				if (this.widgets.length) {
+					options.push({
+						content: "Add additional value",
+						callback: () => {
+							this.#addWidget();
+							app.canvas.setDirty(true);
+						},
+					});
+
 					if (this.widgets[0].type === "combo") {
 						options.push({
 							content: "Add all values",
@@ -259,18 +267,61 @@ app.registerExtension({
 										this.#addWidget(false, v);
 									}
 								}
+								app.canvas.setDirty(true);
 							},
 						});
 					}
-					options.push(
-						{
-							content: "Add additional value",
-							callback: () => {
-								this.#addWidget();
+
+					if (this.widgets.length - this.#hasRandomize) {
+						const graphPos = app.canvas.graph_mouse;
+
+						const x = graphPos[0] - this.pos[0];
+						const y = graphPos[1] - this.pos[1];
+
+						for (let i = 0; i < this.widgets.length - this.#hasRandomize; i++) {
+							const w = this.widgets[i];
+							let widgetWidth, widgetHeight;
+							if (w.computeSize) {
+								const sz = w.computeSize();
+								widgetWidth = sz[0];
+								widgetHeight = sz[1];
+							} else {
+								widgetWidth = w.width || this.size[0];
+								widgetHeight = LiteGraph.NODE_WIDGET_HEIGHT;
+							}
+
+							if (
+								x >= 6 &&
+								x <= widgetWidth - 12 &&
+								y >= w.last_y &&
+								y <= w.last_y + widgetHeight &&
+								w.last_y !== undefined
+							) {
+								options.push({
+									content: `Remove value '${w.value}'`,
+									callback: () => {
+										this.widgets.splice(i, 1);
+										app.canvas.setDirty(true);
+									},
+								});
+								break;
+							}
+						}
+
+						options.push(
+							{
+								content: "Remove additional values",
+								callback: () => {
+									while (this.widgets.length > 1 + this.#hasRandomize) {
+										this.widgets.splice(1, 1);
+									}
+									app.canvas.setDirty(true);
+								},
+								disabled: this.widgets.length === 1 + this.#hasRandomize,
 							},
-						},
-						null
-					);
+							null
+						);
+					}
 				}
 				return [];
 			}
@@ -295,7 +346,12 @@ app.registerExtension({
 				this.outputs[0].name = type;
 				this.outputs[0].widget = widget;
 
-				this.#addWidget = (first, value) => this.#createWidget(widget.config, theirNode, widget.name, first, value);
+				this.#addWidget = (first, value) => {
+					this.#createWidget(widget.config, theirNode, widget.name, first, value);
+					if (!first && this.#hasRandomize) {
+						this.widgets.splice(this.widgets.length - 2, 0, this.widgets.pop());
+					}
+				};
 				this.#addWidget(true);
 			}
 
@@ -323,9 +379,18 @@ app.registerExtension({
 						}
 					}
 				}
-				if (first && widget.type === "number") {
-					addValueControlWidget(this, widget, "fixed");
-					this.#hasRandomize = true;
+
+				if (first) {
+					if (this.widgets_values) {
+						for (let i = 1 + this.#hasRandomize; i < this.widgets_values.length; i++) {
+							this.#createWidget(inputData, null, widgetName, false, this.widgets_values[i]);
+						}
+					}
+
+					if (widget.type === "number") {
+						addValueControlWidget(this, widget, "fixed");
+						this.#hasRandomize = true;
+					}
 				}
 
 				// When our value changes, update other widgets to reflect our changes

@@ -1114,7 +1114,6 @@ class ComfyApp {
 					let repeatIndex = 0;
 					let p;
 					do {
-						console.log("Generating repeat", repeatIndex, "of", repeats ? repeats.length : "?");
 						p = await this.graphToPrompt({ repeatIndexes: repeats?.[repeatIndex] });
 						if (repeats === null) {
 							if (p.repeats) {
