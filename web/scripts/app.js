@@ -6,6 +6,7 @@ import { getPngMetadata, importA1111 } from "./pnginfo.js";
 
 /** 
  * @typedef {import("types/comfy").ComfyExtension} ComfyExtension
+ * @typedef {import("types/litegraph").LGraph} LGraph
  */
 
 export class ComfyApp {
@@ -746,6 +747,10 @@ export class ComfyApp {
 		this.#addProcessMouseHandler();
 		this.#addProcessKeyHandler();
 
+		/**
+		 * The LiteGraph graph object
+		 * @type {LGraph}
+		 */
 		this.graph = new LGraph();
 		const canvas = (this.canvas = new LGraphCanvas(canvasEl, this.graph));
 		this.ctx = canvasEl.getContext("2d");
@@ -998,59 +1003,61 @@ export class ComfyApp {
 		const workflow = this.graph.serialize();
 		const output = {};
 		// Process nodes in order of execution
-		for (const node of this.graph.computeExecutionOrder(false)) {
-			const n = workflow.nodes.find((n) => n.id === node.id);
-
-			if (node.isVirtualNode) {
-				// Don't serialize frontend only nodes but let them make changes
-				if (node.applyToGraph) {
-					node.applyToGraph(workflow);
-				}
-				continue;
-			}
-
-			if (node.mode === 2) {
-				// Don't serialize muted nodes
-				continue;
-			}
-
-			const inputs = {};
-			const widgets = node.widgets;
-
-			// Store all widget values
-			if (widgets) {
-				for (const i in widgets) {
-					const widget = widgets[i];
-					if (!widget.options || widget.options.serialize !== false) {
-						inputs[widget.name] = widget.serializeValue ? await widget.serializeValue(n, i) : widget.value;
+		for (const outerNode of this.graph.computeExecutionOrder(false)) {
+			const n = workflow.nodes.find((n) => n.id === outerNode.id);
+			const innerNodes = outerNode.getInnerNodes ? outerNode.getInnerNodes() : [outerNode];
+			for (const node of innerNodes) {
+				if (node.isVirtualNode) {
+					// Don't serialize frontend only nodes but let them make changes
+					if (node.applyToGraph) {
+						node.applyToGraph(workflow);
 					}
+					continue;
 				}
-			}
 
-			// Store all node links
-			for (let i in node.inputs) {
-				let parent = node.getInputNode(i);
-				if (parent) {
-					let link = node.getInputLink(i);
-					while (parent && parent.isVirtualNode) {
-						link = parent.getInputLink(link.origin_slot);
-						if (link) {
-							parent = parent.getInputNode(link.origin_slot);
-						} else {
-							parent = null;
+				if (node.mode === 2) {
+					// Don't serialize muted nodes
+					continue;
+				}
+
+				const inputs = {};
+				const widgets = node.widgets;
+
+				// Store all widget values
+				if (widgets) {
+					for (const i in widgets) {
+						const widget = widgets[i];
+						if (!widget.options || widget.options.serialize !== false) {
+							inputs[widget.name] = widget.serializeValue ? await widget.serializeValue(n, i) : widget.value;
 						}
 					}
+				}
 
-					if (link) {
-						inputs[node.inputs[i].name] = [String(link.origin_id), parseInt(link.origin_slot)];
+				// Store all node links
+				for (let i in node.inputs) {
+					let parent = node.getInputNode(i);
+					if (parent) {
+						let link = node.getInputLink(i);
+						while (parent && parent.isVirtualNode) {
+							link = parent.getInputLink(link.origin_slot);
+							if (link) {
+								parent = parent.getInputNode(link.origin_slot);
+							} else {
+								parent = null;
+							}
+						}
+
+						if (link) {
+							inputs[node.inputs[i].name] = [String(link.origin_id), parseInt(link.origin_slot)];
+						}
 					}
 				}
-			}
 
-			output[String(node.id)] = {
-				inputs,
-				class_type: node.comfyClass,
-			};
+				output[String(node.id)] = {
+					inputs,
+					class_type: node.comfyClass,
+				};
+			}
 		}
 
 		// Remove inputs connected to removed nodes
