@@ -2,7 +2,10 @@ import { app } from "/scripts/app.js";
 import { ComfyWidgets } from "/scripts/widgets.js";
 
 /**
- * @typedef { import("/types/litegraph") } LG
+ * @typedef { import("/types/litegraph").LGraphNode } LGraphNode
+ * @typedef { import("/types/litegraph").LGraphGroup } LGraphGroup
+ * @typedef { import("/types/litegraph").LLink } LLink
+ * @typedef { import("/types/litegraph").SerializedLGraphNode } SerializedLGraphNode
  **/
 
 app.registerExtension({
@@ -10,7 +13,7 @@ app.registerExtension({
 	init() {
 		/**
 		 *
-		 * @param {LG["LGraphGroup"]["prototype"] & {_nodes: LG["LGraphNode"]["prototype"][]}} groupNode
+		 * @param {LGraphGroup & {_nodes: LGraphNode[]}} groupNode
 		 */
 		function convertGroup(groupNode) {
 			groupNode.recomputeInsideNodes();
@@ -125,7 +128,7 @@ app.registerExtension({
 			}
 
 			onConfigure() {
-				debugger
+				debugger;
 			}
 
 			getInputNode(slot) {
@@ -151,9 +154,9 @@ app.registerExtension({
 
 			/**
 			 * Populates the group node with the internal nodes
-			 * @this {GroupNode & LG["LGraphNode"]["prototype"] }
-			 * @param {{nodes: {}, links: Record<number, LG["LLink"]["prototype"]>, group: {}}}} param0
-			 * @param {{inputs: Record<number, LG["LLink"]["prototype"]>, outputs: Record<number, Record<number, LG["LLink"]["prototype"]>>}} external
+			 * @this {GroupNode & LGraphNode }
+			 * @param {{nodes: SerializedLGraphNode[], links: Record<number, LLink>, group: {}}}} param0
+			 * @param {{inputs: Record<number, LLink>, outputs: Record<number, Record<number, LLink>>}} external
 			 */
 			populate({ nodes, links, group }, external) {
 				this.flags.groupData = { nodes, links, group };
