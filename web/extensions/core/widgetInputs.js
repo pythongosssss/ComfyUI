@@ -8,7 +8,7 @@ function isConvertableWidget(widget, config) {
 	return VALID_TYPES.includes(widget.type) || VALID_TYPES.includes(config[0]);
 }
 
-function hideWidget(node, widget, suffix = "") {
+export function hideWidget(node, widget, suffix = "") {
 	widget.origType = widget.type;
 	widget.origComputeSize = widget.computeSize;
 	widget.origSerializeValue = widget.serializeValue;
