@@ -1,6 +1,6 @@
 import { app } from "/scripts/app.js";
 import { ComfyWidgets } from "/scripts/widgets.js";
-import { hideWidget } from "/extensions/core/widgetInputs.js";
+import { hideWidget, showWidget } from "/extensions/core/widgetInputs.js";
 
 /**
  * @typedef { import("/types/litegraph").LGraphNode } LGraphNode
@@ -15,8 +15,10 @@ class GroupNode {
 	#oldToNewId = {};
 	/** @type { Record<number, number> } */
 	#newToOldId = {};
+	/** @type { Record<number, LGraphNode> } */
+	#internalNodeLookup = {};
 	/** @type { LGraphNode[] } */
-	internalNodes = [];
+	#internalNodes = [];
 
 	serialize_widgets = true;
 	isVirtualNode = true;
@@ -28,19 +30,29 @@ class GroupNode {
 	static from(group) {
 		group.recomputeInsideNodes();
 
+		// Validate before starting
+		for (const child of group._nodes) {
+			if (child.type === "GroupNode") {
+				alert("You cannot convert a group with a nested group node!");
+				return;
+			}
+		}
+
 		/** @type {GroupNode & LGraphNode} */
 		const node = LiteGraph.createNode("GroupNode");
-		node.internalNodes.push(...group._nodes);
+		node.#internalNodes.push(...group._nodes);
 		node.flags.internalLinks = {};
+		node.flags.visibleWidgets = {};
 		node.pos = group.pos;
 		app.graph.add(node);
 
 		for (const child of group._nodes) {
+			node.#internalNodeLookup[child.id] = child;
+			node.#oldToNewId[child.id] = child.id;
+			node.#newToOldId[child.id] = child.id;
 			node.#handleInputs(child);
 			node.#addOutputs(child);
 			child.originalId = child.id;
-			node.#oldToNewId[child.id] = child.id;
-			node.#newToOldId[child.id] = child.id;
 		}
 
 		// Store the list of internal nodes for recreation on reload
@@ -55,12 +67,12 @@ class GroupNode {
 		app.graph.remove(group);
 
 		// Restore any external links from this group
-		node.restoreLinks();
+		node.#restoreLinks();
 
 		return node;
 	}
 
-	restoreLinks() {
+	#restoreLinks() {
 		// Restore external links
 		for (const link of this.#externalLinks) {
 			const from = app.graph.getNodeById(link.origin_id);
@@ -69,23 +81,9 @@ class GroupNode {
 		}
 	}
 
-	onConfigure() {
-		// On reload create an unmounted node to map our values
-		for (const nodeData of this.flags.internalNodes) {
-			const node = LiteGraph.createNode(nodeData.type);
-			const id = nodeData.id;
-			node.configure({ ...nodeData });
-			node.id = ++app.graph.last_node_id;
-			node.originalId = id;
-			this.#oldToNewId[id] = node.id;
-			this.#newToOldId[node.id] = id;
-			this.internalNodes.push(node);
-		}
-		this.#ready();
-	}
-
 	#ready() {
-		for (const child of this.internalNodes) {
+		for (const child of this.#internalNodes) {
+			this.#internalNodeLookup[child.id] = child;
 			this.#addWidgets(child);
 
 			child.getInputNode = (slot) => {
@@ -95,13 +93,14 @@ class GroupNode {
 				}
 
 				if (link.internal) {
-					return this.internalNodes.find((n) => n.id === link.origin_id);
+					return this.#internalNodeLookup[link.origin_id];
 				}
 
 				return app.graph.getNodeById(link.origin_id);
 			};
 
 			child.getInputLink = (slot) => {
+				slot = +slot;
 				const oldId = this.#newToOldId[child.id];
 				const internalLink = this.flags.internalLinks[oldId]?.[slot];
 				if (internalLink) {
@@ -113,19 +112,19 @@ class GroupNode {
 					};
 				}
 
-				const input = this.inputs.find((i) => i.for.id === oldId && i.for.slot === +slot);
+				const inputIndex = this.inputs.findIndex((i) => i.for.id === oldId && i.for.slot === slot);
+				const input = inputIndex !== -1 ? this.inputs[inputIndex] : null;
 				if (input?.link) {
 					// Redirect this link to the internal child
-					return app.graph.links[input.link];
+					const link = app.graph.links[input.link];
+					return {
+						...link,
+						target_id: child.id,
+						target_slot: slot,
+					};
 				}
 				return null;
 			};
-		}
-
-		if (this.widgets) {
-			for (const widget of this.widgets) {
-				hideWidget(this, widget);
-			}
 		}
 	}
 
@@ -159,8 +158,14 @@ class GroupNode {
 				w.value = widget.value;
 				return callback ? callback.apply(this, arguments) : undefined;
 			};
+			widget.for = node;
+			widget.shortName = w.name;
 
 			widget.value = this.widgets_values?.[(this.widgets?.length || 1) - 1] || w.value;
+			const id = this.#newToOldId[node.id] + ":" + w.name;
+			if (!this.flags.visibleWidgets[id]) {
+				hideWidget(this, widget);
+			}
 		}
 	}
 
@@ -177,7 +182,7 @@ class GroupNode {
 			if (input.link) {
 				// This input is connected to another node, if it is an internal link it doesnt need an input
 				const link = app.graph.links[input.link];
-				const isInternal = this.internalNodes.find((n) => n.id === link.origin_id);
+				const isInternal = this.#internalNodes.find((n) => n.id === link.origin_id);
 
 				if (isInternal) {
 					// Store internal inputs for relinking when serializing the graph
@@ -225,7 +230,7 @@ class GroupNode {
 
 			for (const l of output.links || []) {
 				const link = app.graph.links[l];
-				const isInternal = this.internalNodes.find((n) => n.id === link.target_id);
+				const isInternal = this.#internalNodes.find((n) => n.id === link.target_id);
 				if (isInternal) {
 					add = false;
 				} else {
@@ -242,14 +247,29 @@ class GroupNode {
 		}
 	}
 
+	onConfigure() {
+		// On reload create an unmounted node to map our values
+		for (const nodeData of this.flags.internalNodes) {
+			const node = LiteGraph.createNode(nodeData.type);
+			const id = nodeData.id;
+			node.configure({ ...nodeData });
+			node.id = ++app.graph.last_node_id;
+			node.originalId = id;
+			this.#oldToNewId[id] = node.id;
+			this.#newToOldId[node.id] = id;
+			this.#internalNodes.push(node);
+		}
+		this.#ready();
+	}
+
 	getInnerNodes() {
-		return this.internalNodes;
+		return this.#internalNodes;
 	}
 
 	getInputNode(slot) {
 		// Replace the inputs of the group with the inner nodes
 		const output = this.outputs[slot];
-		const node = this.internalNodes.find((n) => n.originalId === output.node);
+		const node = this.#internalNodeLookup[this.#oldToNewId[output.node]];
 		return node;
 	}
 
@@ -262,15 +282,44 @@ class GroupNode {
 			target_slot: slot,
 		};
 	}
+
+	getExtraMenuOptions(_, options) {
+		if (!this.widgets) return;
+
+		const nodeOptions = {};
+		for (const w of this.widgets) {
+			let nodeMenu = nodeOptions[w.for.id];
+			if (!nodeMenu) {
+				nodeMenu = nodeOptions[w.for.id] = {
+					title: "Widgets: " + w.for.title || w.for.type,
+					has_submenu: true,
+					submenu: { options: [] },
+				};
+			}
+
+			const isHidden = w.type === "converted-widget";
+			nodeMenu.submenu.options.push({
+				title: (isHidden ? "Show " : "Hide ") + w.shortName,
+				callback: () => {
+					const id = this.#newToOldId[w.for.id] + ":" + w.shortName;
+					if (isHidden) {
+						showWidget(w);
+						this.flags.visibleWidgets[id] = true;
+					} else {
+						hideWidget(w);
+						delete this.flags.visibleWidgets[id];
+					}
+				},
+			});
+		}
+
+		options.push(...Object.values(nodeOptions), null);
+	}
 }
 
 app.registerExtension({
 	name: "Comfy.GroupNode",
 	init() {
-		function convertGroup(group) {
-			GroupNode.from(group);
-		}
-
 		const getGroupMenuOptions = LGraphCanvas.prototype.getGroupMenuOptions;
 		LGraphCanvas.prototype.getGroupMenuOptions = function (group) {
 			const opts = getGroupMenuOptions.apply(this, arguments);
@@ -278,7 +327,7 @@ app.registerExtension({
 			opts.unshift(
 				{
 					content: "Convert to Node",
-					callback: () => convertGroup(group),
+					callback: () => GroupNode.from(group),
 				},
 				null
 			);

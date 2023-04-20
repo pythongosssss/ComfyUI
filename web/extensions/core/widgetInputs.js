@@ -31,7 +31,7 @@ export function hideWidget(node, widget, suffix = "") {
 	}
 }
 
-function showWidget(widget) {
+export function showWidget(widget) {
 	widget.type = widget.origType;
 	widget.computeSize = widget.origComputeSize;
 	widget.serializeValue = widget.origSerializeValue;
