@@ -1,4 +1,5 @@
 import { app } from "/scripts/app.js";
+import { api } from "/scripts/api.js";
 import { ComfyWidgets } from "/scripts/widgets.js";
 import { hideWidget, showWidget } from "/extensions/core/widgetInputs.js";
 
@@ -19,6 +20,8 @@ class GroupNode {
 	#internalNodeLookup = {};
 	/** @type { LGraphNode[] } */
 	#internalNodes = [];
+	/** @type { LGraphNode | null } */
+	#runningNode = null;
 
 	serialize_widgets = true;
 	isVirtualNode = true;
@@ -43,6 +46,7 @@ class GroupNode {
 		node.#internalNodes.push(...group._nodes);
 		node.flags.internalLinks = {};
 		node.flags.visibleWidgets = {};
+		node.title = group.title;
 		node.pos = group.pos;
 		app.graph.add(node);
 
@@ -57,6 +61,7 @@ class GroupNode {
 
 		// Store the list of internal nodes for recreation on reload
 		node.flags.internalNodes = group._nodes.map((n) => n.serialize());
+		node.flags.group = group.serialize();
 
 		// Setup widgets
 		node.#ready();
@@ -70,6 +75,11 @@ class GroupNode {
 		node.#restoreLinks();
 
 		return node;
+	}
+
+	constructor() {
+		this.#handleExecuting = this.#handleExecuting.bind(this);
+		this.#handleExecuted = this.#handleExecuted.bind(this);
 	}
 
 	#restoreLinks() {
@@ -126,13 +136,21 @@ class GroupNode {
 				return null;
 			};
 		}
+
+		api.addEventListener("executing", this.#handleExecuting);
+		api.addEventListener("executed", this.#handleExecuted);
 	}
 
 	#addWidgets(node) {
 		if (!node.widgets) return;
 		for (const w of node.widgets) {
 			const inputData = node.constructor.nodeData?.input?.required[w.name] ||
-				node.constructor.nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
+				node.constructor.nodeData?.input?.optional?.[w.name] || [w.origType || w.type, w.options || {}];
+
+			// Show any internal widgets
+			if (w.type === "converted-widget") {
+				showWidget(w);
+			}
 
 			let type = inputData[0];
 			if (type instanceof Array) {
@@ -154,6 +172,7 @@ class GroupNode {
 
 			// When our value changes, update internal node widget to reflect our changes
 			const callback = widget.callback;
+
 			widget.callback = function () {
 				w.value = widget.value;
 				return callback ? callback.apply(this, arguments) : undefined;
@@ -164,7 +183,7 @@ class GroupNode {
 			widget.value = this.widgets_values?.[(this.widgets?.length || 1) - 1] || w.value;
 			const id = this.#newToOldId[node.id] + ":" + w.name;
 			if (!this.flags.visibleWidgets[id]) {
-				hideWidget(this, widget);
+				hideWidget(this, widget, undefined, false);
 			}
 		}
 	}
@@ -199,7 +218,7 @@ class GroupNode {
 
 			if (addInput) {
 				// Get connected type from reroute nodes
-				let { name, type } = input;
+				let { name, type, widget } = input;
 				if (node.type === "Reroute") {
 					const output = node.outputs[i];
 					const link = output.links?.[0];
@@ -212,6 +231,7 @@ class GroupNode {
 				}
 
 				this.addInput(name, type, {
+					widget: widget ? { ...widget, name: node.title + " " + widget.name } : undefined,
 					for: {
 						id: node.id,
 						slot: i,
@@ -240,12 +260,38 @@ class GroupNode {
 
 			if (add) {
 				this.addOutput(output.name, output.type, {
-					node: node.id,
-					slot: i,
+					for: {
+						id: node.id,
+						slot: i,
+					},
 				});
 			}
 		}
 	}
+
+	#handleExecuting = ({ detail }) => {
+		const node = this.#internalNodeLookup[detail + ""];
+		if (node) {
+			this.#runningNode = node;
+			app.runningNodeId = this.id;
+			app.graph.setDirtyCanvas(true, false);
+		} else {
+			this.#runningNode = null;
+		}
+	};
+
+	#handleExecuted = ({ detail }) => {
+		const node = this.#newToOldId[detail.node + ""];
+		if (node) {
+			if (!app.nodeOutputs[this.id]) {
+				app.nodeOutputs[this.id] = detail.output;
+			} else {
+				Object.assign(app.nodeOutputs[this.id], detail.output);
+			}
+			node.onExecuted?.(detail.output);
+			app.graph.setDirtyCanvas(true, false);
+		}
+	};
 
 	onConfigure() {
 		// On reload create an unmounted node to map our values
@@ -269,18 +315,87 @@ class GroupNode {
 	getInputNode(slot) {
 		// Replace the inputs of the group with the inner nodes
 		const output = this.outputs[slot];
-		const node = this.#internalNodeLookup[this.#oldToNewId[output.node]];
+		const node = this.#internalNodeLookup[this.#oldToNewId[output.for.id]];
 		return node;
 	}
 
 	getInputLink(slot) {
-		const input = this.outputs[slot];
+		const output = this.outputs[slot];
 		return {
 			origin_id: this.getInputNode(slot).id,
-			origin_slot: input.slot,
+			origin_slot: output.for.slot,
 			target_id: this.id,
 			target_slot: slot,
 		};
+	}
+
+	getTitle() {
+		console.log(this.#runningNode);
+		return `${LGraphNode.prototype.getTitle.call(this)} ${
+			this.#runningNode ? `[${this.#runningNode.getTitle()}]` : ""
+		}`;
+	}
+
+	explode() {
+		// Recreate the group
+		const groupData = this.flags.group;
+		const group = new LiteGraph.LGraphGroup();
+		app.graph.add(group);
+		group.configure(groupData);
+
+		// Calculate offset from new position vs stored position
+		const xDiff = group.pos[0] - this.pos[0];
+		const yDiff = group.pos[1] - this.pos[1];
+
+		// Add and shift all internal nodes back inside the group
+		for (const node of this.#internalNodes) {
+			app.graph.add(node);
+			node.pos[0] -= xDiff;
+			node.pos[1] -= yDiff;
+		}
+
+		// Connect all external inputs to the group node
+		for (const input of this.inputs) {
+			if (input.link) {
+				const link = app.graph.links[input.link];
+				app.graph
+					.getNodeById(link.origin_id)
+					.connect(link.origin_slot, app.graph.getNodeById(this.#oldToNewId[input.for.id]), input.for.slot);
+			}
+		}
+
+		// Connect all external outputs to the group node
+		for (const output of this.outputs || []) {
+			if (output.links?.length) {
+				const newId = this.#oldToNewId[output.for.id];
+				for (const l of output.links) {
+					const link = app.graph.links[l];
+					app.graph
+						.getNodeById(newId)
+						.connect(output.for.slot, app.graph.getNodeById(link.target_id), link.target_slot);
+				}
+			}
+		}
+
+		// Connect all internal links
+		for (const oldId in this.flags.internalLinks) {
+			const newId = this.#oldToNewId[oldId];
+			const links = this.flags.internalLinks[oldId];
+			for (const slot in links) {
+				const link = links[slot];
+				app.graph
+					.getNodeById(this.#oldToNewId[link.origin_id])
+					.connect(link.origin_slot, app.graph.getNodeById(newId), link.target_slot);
+			}
+		}
+
+		group.pos = this.pos;
+		app.graph.remove(this);
+	}
+
+	onRemoved() {
+		api.removeEventListener("executing", this.#handleExecuting);
+		api.removeEventListener("executed", this.#handleExecuted);
 	}
 
 	getExtraMenuOptions(_, options) {
@@ -306,7 +421,7 @@ class GroupNode {
 						showWidget(w);
 						this.flags.visibleWidgets[id] = true;
 					} else {
-						hideWidget(w);
+						hideWidget(this, w, undefined, false);
 						delete this.flags.visibleWidgets[id];
 					}
 				},
@@ -314,6 +429,16 @@ class GroupNode {
 		}
 
 		options.push(...Object.values(nodeOptions), null);
+
+		options.push(
+			{
+				title: "Convert to Nodes",
+				callback: () => {
+					this.explode();
+				},
+			},
+			null
+		);
 	}
 }
 
@@ -344,5 +469,6 @@ app.registerExtension({
 		);
 
 		GroupNode.category = "hidden";
+		app.addCustomNodeHandlers(GroupNode);
 	},
 });

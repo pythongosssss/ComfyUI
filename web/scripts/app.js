@@ -100,7 +100,9 @@ export class ComfyApp {
 	 * @param {*} node The node to add the menu handler
 	 */
 	#addNodeContextMenuHandler(node) {
+		const orig = node.prototype.getExtraMenuOptions;
 		node.prototype.getExtraMenuOptions = function (_, options) {
+			const r = orig?.apply?.(this, arguments);
 			if (this.imgs) {
 				// If this node has images then we add an open in new tab item
 				let img;
@@ -131,6 +133,7 @@ export class ComfyApp {
 					);
 				}
 			}
+			return r;
 		};
 	}
 
@@ -470,7 +473,7 @@ export class ComfyApp {
 			this.selected_group_moving = false;
 
 			if (this.selected_group && !this.selected_group_resizing) {
-				var font_size =
+				var font_size = 
 					this.selected_group.font_size || LiteGraph.DEFAULT_GROUP_FONT_SIZE;
 				var height = font_size * 1.4;
 
@@ -746,6 +749,7 @@ export class ComfyApp {
 
 		this.#addProcessMouseHandler();
 		this.#addProcessKeyHandler();
+		this.#addApiUpdateHandlers();
 
 		/**
 		 * The LiteGraph graph object
@@ -796,7 +800,6 @@ export class ComfyApp {
 
 		this.#addDrawNodeHandler();
 		this.#addDrawGroupsHandler();
-		this.#addApiUpdateHandlers();
 		this.#addDropHandler();
 		this.#addPasteHandler();
 		this.#addKeyboardHandler();
@@ -874,9 +877,7 @@ export class ComfyApp {
 			);
 			node.prototype.comfyClass = nodeData.name;
 
-			this.#addNodeContextMenuHandler(node);
-			this.#addDrawBackgroundHandler(node, app);
-			this.#addNodeKeyHandler(node);
+			this.addCustomNodeHandlers(node);
 
 			await this.#invokeExtensionsAsync("beforeRegisterNodeDef", node, nodeData);
 			LiteGraph.registerNodeType(nodeId, node);
@@ -884,6 +885,12 @@ export class ComfyApp {
 		}
 
 		await this.#invokeExtensionsAsync("registerCustomNodes");
+	}
+
+	addCustomNodeHandlers(node) {
+		this.#addNodeContextMenuHandler(node);
+		this.#addDrawBackgroundHandler(node, this);
+		this.#addNodeKeyHandler(node);
 	}
 
 	/**
@@ -1099,13 +1106,15 @@ export class ComfyApp {
 					}
 
 					for (const n of p.workflow.nodes) {
-						const node = graph.getNodeById(n.id);
-						if (node.widgets) {
-							for (const widget of node.widgets) {
-								// Allow widgets to run callbacks after a prompt has been queued
-								// e.g. random seed after every gen
-								if (widget.afterQueued) {
-									widget.afterQueued();
+						const outerNode = graph.getNodeById(n.id);
+						for (const node of [outerNode, ...outerNode.getInnerNodes?.() || []]) {
+							if (node.widgets) {
+								for (const widget of node.widgets) {
+									// Allow widgets to run callbacks after a prompt has been queued
+									// e.g. random seed after every gen
+									if (widget.afterQueued) {
+										widget.afterQueued();
+									}
 								}
 							}
 						}
