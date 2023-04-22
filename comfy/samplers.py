@@ -7,23 +7,6 @@ from comfy import model_management
 from .ldm.models.diffusion.ddim import DDIMSampler
 from .ldm.modules.diffusionmodules.util import make_ddim_timesteps
 
-class CFGDenoiser(torch.nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.inner_model = model
-
-    def forward(self, x, sigma, uncond, cond, cond_scale):
-        if len(uncond[0]) == len(cond[0]) and x.shape[0] * x.shape[2] * x.shape[3] < (96 * 96): #TODO check memory instead
-            x_in = torch.cat([x] * 2)
-            sigma_in = torch.cat([sigma] * 2)
-            cond_in = torch.cat([uncond, cond])
-            uncond, cond = self.inner_model(x_in, sigma_in, cond=cond_in).chunk(2)
-        else:
-            cond = self.inner_model(x, sigma, cond=cond)
-            uncond = self.inner_model(x, sigma, cond=uncond)
-        return uncond + (cond - uncond) * cond_scale
-
-
 #The main sampling function shared by all the samplers
 #Returns predicted noise
 def sampling_function(model_function, x, timestep, uncond, cond, cond_scale, cond_concat=None, model_options={}):
@@ -36,8 +19,8 @@ def sampling_function(model_function, x, timestep, uncond, cond, cond_scale, con
                 strength = cond[1]['strength']
 
             adm_cond = None
-            if 'adm' in cond[1]:
-                adm_cond = cond[1]['adm']
+            if 'adm_encoded' in cond[1]:
+                adm_cond = cond[1]['adm_encoded']
 
             input_x = x_in[:,:,area[2]:area[0] + area[2],area[3]:area[1] + area[3]]
             mult = torch.ones_like(input_x) * strength
@@ -405,7 +388,7 @@ def encode_adm(noise_augmentor, conds, batch_size, device):
         else:
             adm_out = torch.zeros((1, noise_augmentor.time_embed.dim * 2), device=device)
         x[1] = x[1].copy()
-        x[1]["adm"] = torch.cat([adm_out] * batch_size)
+        x[1]["adm_encoded"] = torch.cat([adm_out] * batch_size)
 
     return conds
 
