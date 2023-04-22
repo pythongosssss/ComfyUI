@@ -8,20 +8,22 @@ function isConvertableWidget(widget, config) {
 	return VALID_TYPES.includes(widget.type) || VALID_TYPES.includes(config[0]);
 }
 
-export function hideWidget(node, widget, suffix = "") {
+export function hideWidget(node, widget, suffix = "", disableSerialize = true) {
 	widget.origType = widget.type;
 	widget.origComputeSize = widget.computeSize;
-	widget.origSerializeValue = widget.serializeValue;
 	widget.computeSize = () => [0, -4]; // -4 is due to the gap litegraph adds between widgets automatically
 	widget.type = CONVERTED_TYPE + suffix;
-	widget.serializeValue = () => {
-		// Prevent serializing the widget if we have no input linked
-		const { link } = node.inputs.find((i) => i.widget?.name === widget.name);
-		if (link == null) {
-			return undefined;
-		}
-		return widget.origSerializeValue ? widget.origSerializeValue() : widget.value;
-	};
+	if (disableSerialize) {
+		widget.origSerializeValue = widget.serializeValue;
+		widget.serializeValue = () => {
+			// Prevent serializing the widget if we have no input linked
+			const { link } = node.inputs.find((i) => i.widget?.name === widget.name);
+			if (link == null) {
+				return undefined;
+			}
+			return widget.origSerializeValue ? widget.origSerializeValue() : widget.value;
+		};
+	}
 
 	// Hide any linked widgets, e.g. seed+seedControl
 	if (widget.linkedWidgets) {
