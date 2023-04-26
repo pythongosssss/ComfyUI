@@ -182,7 +182,7 @@ class GroupNode {
 
 			widget.value = this.widgets_values?.[(this.widgets?.length || 1) - 1] || w.value;
 			widget.callback(widget.value);
-			
+
 			const id = this.#newToOldId[node.id] + ":" + w.name;
 			if (!this.flags.visibleWidgets[id]) {
 				hideWidget(this, widget, undefined, false);
@@ -357,7 +357,7 @@ class GroupNode {
 		}
 
 		// Connect all external inputs to the group node
-		for (const input of this.inputs) {
+		for (const input of this.inputs || []) {
 			if (input.link) {
 				const link = app.graph.links[input.link];
 				app.graph
@@ -425,6 +425,10 @@ class GroupNode {
 					} else {
 						hideWidget(this, w, undefined, false);
 						delete this.flags.visibleWidgets[id];
+					}
+					app.graph.setDirtyCanvas(true);
+					if (this.onResize) {
+						this.onResize(this.size);
 					}
 				},
 			});
