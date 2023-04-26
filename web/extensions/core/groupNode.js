@@ -181,6 +181,8 @@ class GroupNode {
 			widget.shortName = w.name;
 
 			widget.value = this.widgets_values?.[(this.widgets?.length || 1) - 1] || w.value;
+			widget.callback(widget.value);
+			
 			const id = this.#newToOldId[node.id] + ":" + w.name;
 			if (!this.flags.visibleWidgets[id]) {
 				hideWidget(this, widget, undefined, false);
