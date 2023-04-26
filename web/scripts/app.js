@@ -956,6 +956,7 @@ export class ComfyApp {
 				{
 					title: nodeData.display_name || nodeData.name,
 					comfyClass: nodeData.name,
+					nodeData
 				}
 			);
 			node.prototype.comfyClass = nodeData.name;
