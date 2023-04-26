@@ -11,45 +11,45 @@ function getNumberDefaults(inputData, defaultStep) {
 }
 
 export function addValueControlWidget(node, targetWidget, defaultValue = "randomize", values) {
-    const valueControl = node.addWidget("combo", "control_after_generate", defaultValue, function (v) { }, {
-        values: ["fixed", "increment", "decrement", "randomize"],
-        serialize: false, // Don't include this in prompt.
-    });
-    valueControl.afterQueued = () => {
+	const valueControl = node.addWidget("combo", "control_after_generate", defaultValue, function (v) { }, {
+		 values: ["fixed", "increment", "decrement", "randomize"],
+		 serialize: false, // Don't include this in prompt.
+	});
+	valueControl.afterQueued = () => {
 
-		var v = valueControl.value;
+	  var v = valueControl.value;
 
-		let min = targetWidget.options.min;
-		let max = targetWidget.options.max;
-		// limit to something that javascript can handle
-		max = Math.min(1125899906842624, max);
-		min = Math.max(-1125899906842624, min);
-		let range = (max - min) / (targetWidget.options.step / 10);
+	  let min = targetWidget.options.min;
+	  let max = targetWidget.options.max;
+	  // limit to something that javascript can handle
+	  max = Math.min(1125899906842624, max);
+	  min = Math.max(-1125899906842624, min);
+	  let range = (max - min) / (targetWidget.options.step / 10);
 
-		//adjust values based on valueControl Behaviour
-		switch (v) {
-			case "fixed":
-				break;
-			case "increment":
-				targetWidget.value += targetWidget.options.step / 10;
-				break;
-			case "decrement":
-				targetWidget.value -= targetWidget.options.step / 10;
-				break;
-			case "randomize":
-				targetWidget.value = Math.floor(Math.random() * range) * (targetWidget.options.step / 10) + min;
-			default:
-				break;
-		}
-	/*check if values are over or under their respective
-	 * ranges and set them to min or max.*/
-		if (targetWidget.value < min)
-			targetWidget.value = min;
+	  //adjust values based on valueControl Behaviour
+	  switch (v) {
+		  case "fixed":
+			  break;
+		  case "increment":
+			  targetWidget.value += targetWidget.options.step / 10;
+			  break;
+		  case "decrement":
+			  targetWidget.value -= targetWidget.options.step / 10;
+			  break;
+		  case "randomize":
+			  targetWidget.value = Math.floor(Math.random() * range) * (targetWidget.options.step / 10) + min;
+		  default:
+			  break;
+	  }
+  /*check if values are over or under their respective
+	* ranges and set them to min or max.*/
+	  if (targetWidget.value < min)
+		  targetWidget.value = min;
 
-		if (targetWidget.value > max)
-			targetWidget.value = max;
-	}
-	return valueControl;	
+	  if (targetWidget.value > max)
+		  targetWidget.value = max;
+  }
+  return valueControl;	
 };
 
 function seedWidget(node, inputName, inputData) {
@@ -90,7 +90,7 @@ function addMultilineWidget(node, name, opts, app) {
 
 		// See how large each text input can be
 		freeSpace -= widgetHeight;
-		freeSpace /= multi.length;
+		freeSpace /= multi.length + (!!node.imgs?.length);
 
 		if (freeSpace < MIN_SIZE) {
 			// There isnt enough space for all the widgets, increase the size of the node
@@ -122,6 +122,7 @@ function addMultilineWidget(node, name, opts, app) {
 		},
 		set value(x) {
 			this.inputEl.value = x;
+			widget.callback?.(x);
 		},
 		draw: function (ctx, _, widgetWidth, y, widgetHeight) {
 			if (!this.parent.inputHeight) {
