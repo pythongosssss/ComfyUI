@@ -151,6 +151,10 @@ function addMultilineWidget(node, name, opts, app) {
 	widget.inputEl.className = "comfy-multiline-input";
 	widget.inputEl.value = opts.defaultVal;
 	widget.inputEl.placeholder = opts.placeholder || "";
+	widget.inputEl.addEventListener("input", () => {
+		console.log("callback", widget.value);
+		widget.callback?.(widget.value);
+	});
 	document.addEventListener("mousedown", function (event) {
 		if (!widget.inputEl.contains(event.target)) {
 			widget.inputEl.blur();
