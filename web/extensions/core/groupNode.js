@@ -52,6 +52,7 @@ class GroupNode {
 		node.#internalNodes.push(...ordered);
 		node.flags.internalLinks = {};
 		node.flags.visibleWidgets = {};
+		node.flags.widgetPositions = {};
 		node.title = group.title;
 		node.pos = group.pos;
 		app.graph.add(node);
@@ -145,6 +146,41 @@ class GroupNode {
 
 		api.addEventListener("executing", this.#handleExecuting);
 		api.addEventListener("executed", this.#handleExecuted);
+	}
+
+	// #moveWidget(id, to, from, isInitialise) {
+	// 	const widget = this.widgets.splice(from, 1)[0];
+	// 	// Store value to reset after moving else litegraph will use the value from the previous widget in that index
+	// 	const v = widget.value;
+	// 	this.widgets.splice(to, 0, widget);
+	// 	if (!isInitialise) {
+	// 		widget.value = v;
+	// 	} else {
+	// 		debugger;
+	// 	}
+	// 	this.#refresh();
+
+	// 	this.flags.widgetPositions[id] = to;
+	// }
+
+	#refresh() {
+		// Force widget positions to be recomputed
+		for (let w of this.widgets) {
+			delete w.last_y;
+			delete w.y;
+		}
+		app.graph.setDirtyCanvas(true);
+		// Recompute positions
+		if (this.onResize) {
+			this.onResize(this.size);
+		}
+		requestAnimationFrame(() => {
+			// On next frame, call again to position DOM elements
+			if (this.onResize) {
+				this.onResize(this.size);
+			}
+			app.graph.setDirtyCanvas(true);
+		});
 	}
 
 	#addWidgets(node) {
@@ -317,6 +353,11 @@ class GroupNode {
 		const size = this.size;
 		this.#ready();
 		this.setSize(size);
+
+		// for (const id in this.flags.widgetPositions) {
+		// 	const p = this.widgets.findIndex((w) => this.#newToOldId[w.for.id] + ":" + w.shortName === id);
+		// 	this.#moveWidget(id, this.flags.widgetPositions[id], p, true);
+		// }
 	}
 
 	getInnerNodes() {
@@ -413,35 +454,79 @@ class GroupNode {
 
 		const nodeOptions = {};
 		const orderedOptions = [];
-		for (const w of this.widgets) {
-			let nodeMenu = nodeOptions[w.for.id];
+		for (let widgetIndex = 0; widgetIndex < this.widgets.length; widgetIndex++) {
+			const widget = this.widgets[widgetIndex];
+			let nodeMenu = nodeOptions[widget.for.id];
 			if (!nodeMenu) {
-				nodeMenu = nodeOptions[w.for.id] = {
-					title: "Widgets: " + w.for.title || w.for.type,
+				nodeMenu = nodeOptions[widget.for.id] = {
+					title: "Widgets: " + widget.for.title || widget.for.type,
 					has_submenu: true,
 					submenu: { options: [] },
 				};
 				orderedOptions.push(nodeMenu);
 			}
 
-			const isHidden = w.type === "converted-widget";
-			nodeMenu.submenu.options.push({
-				title: (isHidden ? "Show " : "Hide ") + w.shortName,
-				callback: () => {
-					const id = this.#newToOldId[w.for.id] + ":" + w.shortName;
-					if (isHidden) {
-						showWidget(w);
+			const isHidden = widget.type === "converted-widget";
+			const id = this.#newToOldId[widget.for.id] + ":" + widget.shortName;
+			if (isHidden) {
+				nodeMenu.submenu.options.push({
+					title: "Show: " + widget.shortName,
+					callback: () => {
+						showWidget(widget);
 						this.flags.visibleWidgets[id] = true;
-					} else {
-						hideWidget(this, w, undefined, false);
-						delete this.flags.visibleWidgets[id];
-					}
-					app.graph.setDirtyCanvas(true);
-					if (this.onResize) {
-						this.onResize(this.size);
-					}
-				},
-			});
+						this.#refresh();
+					},
+				});
+			} else {
+				const submenu = [
+					{
+						title: "Hide: " + widget.shortName,
+						callback: () => {
+							hideWidget(this, widget, undefined, false);
+							this.flags.visibleWidgets[id] = false;
+							this.#refresh();
+						},
+					},
+				];
+
+				nodeMenu.submenu.options.push(submenu[0]);
+
+				// let visibleIndexes = [];
+				// let thisVisibleIndex = -1;
+				// for (let i = 0; i < this.widgets.length; i++) {
+				// 	const w = this.widgets[i];
+				// 	if (w.type !== "converted-widget") {
+				// 		if (w === widget) {
+				// 			thisVisibleIndex = visibleIndexes.length;
+				// 		}
+				// 		visibleIndexes.push(i);
+				// 	}
+				// }
+
+				// if (thisVisibleIndex > 0) {
+				// 	submenu.push({
+				// 		title: "Move up",
+				// 		callback: () => {
+				// 			this.#moveWidget(id, visibleIndexes[thisVisibleIndex - 1], widgetIndex);
+				// 		},
+				// 	});
+				// }
+				// if (thisVisibleIndex < visibleIndexes.length - 1) {
+				// 	submenu.push({
+				// 		title: "Move down",
+				// 		callback: () => {
+				// 			this.#moveWidget(id, visibleIndexes[thisVisibleIndex + 1], widgetIndex);
+				// 		},
+				// 	});
+				// }
+
+				// nodeMenu.submenu.options.push({
+				// 	title: widget.shortName,
+				// 	submenu: {
+				// 		options: submenu,
+				// 	},
+				// });
+			}
 		}
 
 		options.push(...orderedOptions, null);
