@@ -41,16 +41,22 @@ class GroupNode {
 			}
 		}
 
+		const order = app.graph.computeExecutionOrder();
+		const ordered = [...group._nodes].sort((a, b) => {
+			console.log(a.title, order.indexOf(a), b.title, order.indexOf(b), order.indexOf(a) - order.indexOf(b));
+			return order.indexOf(a) - order.indexOf(b);
+		});
+
 		/** @type {GroupNode & LGraphNode} */
 		const node = LiteGraph.createNode("GroupNode");
-		node.#internalNodes.push(...group._nodes);
+		node.#internalNodes.push(...ordered);
 		node.flags.internalLinks = {};
 		node.flags.visibleWidgets = {};
 		node.title = group.title;
 		node.pos = group.pos;
 		app.graph.add(node);
 
-		for (const child of group._nodes) {
+		for (const child of ordered) {
 			node.#internalNodeLookup[child.id] = child;
 			node.#oldToNewId[child.id] = child.id;
 			node.#newToOldId[child.id] = child.id;
@@ -60,13 +66,13 @@ class GroupNode {
 		}
 
 		// Store the list of internal nodes for recreation on reload
-		node.flags.internalNodes = group._nodes.map((n) => n.serialize());
+		node.flags.internalNodes = ordered.map((n) => n.serialize());
 		node.flags.group = group.serialize();
 
 		// Setup widgets
 		node.#ready();
 
-		for (const node of group._nodes) {
+		for (const node of ordered) {
 			app.graph.remove(node);
 		}
 		app.graph.remove(group);
@@ -307,7 +313,10 @@ class GroupNode {
 			this.#newToOldId[node.id] = id;
 			this.#internalNodes.push(node);
 		}
+
+		const size = this.size;
 		this.#ready();
+		this.setSize(size);
 	}
 
 	getInnerNodes() {
@@ -332,7 +341,6 @@ class GroupNode {
 	}
 
 	getTitle() {
-		console.log(this.#runningNode);
 		return `${LGraphNode.prototype.getTitle.call(this)} ${
 			this.#runningNode ? `[${this.#runningNode.getTitle()}]` : ""
 		}`;
@@ -404,6 +412,7 @@ class GroupNode {
 		if (!this.widgets) return;
 
 		const nodeOptions = {};
+		const orderedOptions = [];
 		for (const w of this.widgets) {
 			let nodeMenu = nodeOptions[w.for.id];
 			if (!nodeMenu) {
@@ -412,6 +421,7 @@ class GroupNode {
 					has_submenu: true,
 					submenu: { options: [] },
 				};
+				orderedOptions.push(nodeMenu);
 			}
 
 			const isHidden = w.type === "converted-widget";
@@ -434,7 +444,7 @@ class GroupNode {
 			});
 		}
 
-		options.push(...Object.values(nodeOptions), null);
+		options.push(...orderedOptions, null);
 
 		options.push(
 			{
