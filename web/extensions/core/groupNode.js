@@ -233,20 +233,24 @@ class GroupNode {
 
 	#getRerouteInfo(node, i, name, type) {
 		const output = node.outputs[i];
-		const link = output.links?.[0];
-		if (link) {
-			if (type === "*") {
-				type = output.type;
-			}
-			if (type === "*") {
+
+		if (type === "*") {
+			type = output.type;
+		}
+
+		if (type === "*") {
+			const link = output.links?.[0];
+			if (link) {
 				type = app.graph.links[link].type;
 			}
-			if (type === "*") {
-				type = node.__outputType;
-			}
-			if (!name) {
-				name = output.label || output.name || output.type;
-			}
+		}
+
+		if (type === "*") {
+			type = node.__outputType;
+		}
+
+		if (!name) {
+			name = output.label || output.name || type;
 		}
 		return { name, type };
 	}
