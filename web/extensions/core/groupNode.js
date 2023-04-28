@@ -43,7 +43,6 @@ class GroupNode {
 
 		const order = app.graph.computeExecutionOrder();
 		const ordered = [...group._nodes].sort((a, b) => {
-			console.log(a.title, order.indexOf(a), b.title, order.indexOf(b), order.indexOf(a) - order.indexOf(b));
 			return order.indexOf(a) - order.indexOf(b);
 		});
 
@@ -232,6 +231,26 @@ class GroupNode {
 		}
 	}
 
+	#getRerouteInfo(node, i, name, type) {
+		const output = node.outputs[i];
+		const link = output.links?.[0];
+		if (link) {
+			if (type === "*") {
+				type = output.type;
+			}
+			if (type === "*") {
+				type = app.graph.links[link].type;
+			}
+			if (type === "*") {
+				type = node.__outputType;
+			}
+			if (!name) {
+				name = output.label || output.name || output.type;
+			}
+		}
+		return { name, type };
+	}
+
 	/**
 	 * @this {GroupNode & LGraphNode }
 	 * @param {LGraphNode} node
@@ -263,14 +282,13 @@ class GroupNode {
 			if (addInput) {
 				// Get connected type from reroute nodes
 				let { name, type, widget } = input;
+				if (input.label) {
+					name = input.label;
+				}
 				if (node.type === "Reroute") {
-					const output = node.outputs[i];
-					const link = output.links?.[0];
-					if (link) {
-						type = app.graph.links[link].type;
-						if (!name) {
-							name = output.label || output.name || input.type;
-						}
+					({ name, type } = this.#getRerouteInfo(node, i, name, type));
+					if (!name) {
+						name = input.type;
 					}
 				}
 
@@ -303,7 +321,13 @@ class GroupNode {
 			}
 
 			if (add) {
-				this.addOutput(output.name, output.type, {
+				let name = null;
+				let { type } = output;
+				if (node.type === "Reroute") {
+					({ name, type } = this.#getRerouteInfo(node, i, name, type));
+				}
+
+				this.addOutput(name, type, {
 					for: {
 						id: node.id,
 						slot: i,
@@ -450,11 +474,9 @@ class GroupNode {
 	}
 
 	getExtraMenuOptions(_, options) {
-		if (!this.widgets) return;
-
 		const nodeOptions = {};
 		const orderedOptions = [];
-		for (let widgetIndex = 0; widgetIndex < this.widgets.length; widgetIndex++) {
+		for (let widgetIndex = 0; widgetIndex < this.widgets?.length || 0; widgetIndex++) {
 			const widget = this.widgets[widgetIndex];
 			let nodeMenu = nodeOptions[widget.for.id];
 			if (!nodeMenu) {
@@ -529,7 +551,9 @@ class GroupNode {
 			}
 		}
 
-		options.push(...orderedOptions, null);
+		if (orderedOptions.length) {
+			options.push(...orderedOptions, null);
+		}
 
 		options.push(
 			{
