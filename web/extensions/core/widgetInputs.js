@@ -103,7 +103,8 @@ app.registerExtension({
 							callback: () => convertToWidget(this, w),
 						});
 					} else {
-						const config = nodeData?.input?.required[w.name] || nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
+						const config = nodeData?.input?.required[w.name] ||
+							nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
 						if (isConvertableWidget(w, config)) {
 							toInput.push({
 								content: `Convert ${w.name} to input`,
@@ -124,24 +125,34 @@ app.registerExtension({
 			return r;
 		};
 
-		// On initial configure of nodes hide all converted widgets
-		const origOnConfigure = nodeType.prototype.onConfigure;
-		nodeType.prototype.onConfigure = function () {
-			const r = origOnConfigure ? origOnConfigure.apply(this, arguments) : undefined;
-
-			if (this.inputs) {
-				for (const input of this.inputs) {
+		function configureWidgets(node) {
+			if (node.inputs) {
+				for (const input of node.inputs) {
 					if (input.widget) {
-						const w = this.widgets.find((w) => w.name === input.widget.name);
+						const w = node.widgets.find((w) => w.name === input.widget.name);
 						if (w) {
-							hideWidget(this, w);
+							hideWidget(node, w);
 						} else {
-							convertToWidget(this, input)
+							convertToWidget(node, input);
 						}
 					}
 				}
 			}
+		}
 
+		// On initial configure of nodes hide all converted widgets
+		const origOnConfigure = nodeType.prototype.onConfigure;
+		nodeType.prototype.onConfigure = function () {
+			const r = origOnConfigure ? origOnConfigure.apply(this, arguments) : undefined;
+			configureWidgets(this);
+			return r;
+		};
+
+		// When a new node is added, it might already have converted widgets (e.g. group node)
+		const origOnAdded = nodeType.prototype.onAdded;
+		nodeType.prototype.onAdded = function () {
+			const r = origOnAdded?.apply?.(this, arguments);
+			configureWidgets(this);
 			return r;
 		};
 
@@ -262,11 +273,10 @@ app.registerExtension({
 				const input = theirNode.inputs[link.target_slot];
 				if (!input) return;
 
-
 				var _widget;
 				if (!input.widget) {
 					if (!(input.type in ComfyWidgets)) return;
-					_widget = { "name": input.name, "config": [input.type, {}] }//fake widget
+					_widget = { name: input.name, config: [input.type, {}] }; //fake widget
 				} else {
 					_widget = input.widget;
 				}
@@ -292,7 +302,7 @@ app.registerExtension({
 				if (type in ComfyWidgets) {
 					widget = (ComfyWidgets[type](this, "value", inputData, app) || {}).widget;
 				} else {
-					widget = this.addWidget(type, "value", null, () => { }, {});
+					widget = this.addWidget(type, "value", null, () => {}, {});
 				}
 
 				if (node?.widgets && widget) {
