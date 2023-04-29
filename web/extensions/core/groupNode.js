@@ -329,6 +329,8 @@ class GroupNode {
 				let { type } = output;
 				if (node.type === "Reroute") {
 					({ name, type } = this.#getRerouteInfo(node, i, name, type));
+				} else {
+					name = output.label || output.name || type;
 				}
 
 				this.addOutput(name, type, {
