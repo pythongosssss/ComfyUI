@@ -6,8 +6,8 @@ const VALID_TYPES = ["STRING", "combo", "number"];
 
 export function isValidConnection(slot1, slot2) {
 	// Only allow connections where the configs match
-	const config1 = slot1.widget.config;
-	const config2 = slot2.widget.config;
+	const config1 = slot1.getWidget().config;
+	const config2 = slot2.getWidget().config;
 
 	if (config1[0] instanceof Array) {
 		// These checks shouldnt actually be necessary as the types should match
@@ -47,7 +47,7 @@ function hideWidget(node, widget, suffix = "") {
 	widget.type = CONVERTED_TYPE + suffix;
 	widget.serializeValue = () => {
 		// Prevent serializing the widget if we have no input linked
-		const { link } = node.inputs.find((i) => i.widget?.name === widget.name);
+		const { link } = node.inputs.find((i) => i.getWidget?.()?.name === widget.name);
 		if (link == null) {
 			return undefined;
 		}
@@ -87,7 +87,9 @@ function convertToInput(node, widget, config) {
 	// Add input and store widget config for creating on primitive node
 	const sz = node.size;
 	node.addInput(widget.name, linkType, {
-		widget: { name: widget.name, config },
+		// Store this as a function so it isnt serialized
+		getWidget: () => ({ name: widget.name, config }),
+		convertedWidget: widget.name,
 	});
 
 	// Restore original size but grow if needed
@@ -97,7 +99,7 @@ function convertToInput(node, widget, config) {
 function convertToWidget(node, widget) {
 	showWidget(widget);
 	const sz = node.size;
-	node.removeInput(node.inputs.findIndex((i) => i.widget?.name === widget.name));
+	node.removeInput(node.inputs.findIndex((i) => i.getWidget?.()?.name === widget.name));
 
 	// Restore original size but grow if needed
 	node.setSize([Math.max(sz[0], node.size[0]), Math.max(sz[1], node.size[1])]);
@@ -155,17 +157,32 @@ app.registerExtension({
 		};
 
 		// On initial configure of nodes hide all converted widgets
-		const origOnBeforeConfigureLinks = nodeType.prototype.origOnBeforeConfigureLinks;
-		nodeType.prototype.onBeforeConfigureLinks = function () {
-			const r = origOnBeforeConfigureLinks ? origOnBeforeConfigureLinks.apply(this, arguments) : undefined;
-			if (this.inputs) {
-				for (const input of this.inputs) {
+		const onConfigure = nodeType.prototype.onConfigure;
+		nodeType.prototype.onConfigure = function () {
+			const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+			const self = this;
+			if (self.inputs) {
+				for (const input of self.inputs) {
 					if (input.widget) {
-						const w = this.widgets.find((w) => w.name === input.widget.name);
+						// Migrate old widget data
+						input.convertedWidget = input.widget.name;
+						const w = input.widget;
+						input.getWidget = () => input.widget;
+						delete input.widget;
+					}
+
+					// Find any widget inputs and store a reference to the widget on the input
+					if (input.convertedWidget) {
+						const w = self.widgets.find((w) => w.name === input.convertedWidget);
 						if (w) {
-							hideWidget(this, w);
+							const config = nodeData?.input?.required[w.name] ||
+								nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
+
+							input.getWidget = () => ({ name: w.name, config });
+
+							hideWidget(self, w);
 						} else {
-							convertToWidget(this, input);
+							convertToWidget(self, input);
 						}
 					}
 				}
@@ -190,9 +207,9 @@ app.registerExtension({
 			const r = origOnInputDblClick ? origOnInputDblClick.apply(this, arguments) : undefined;
 
 			const input = this.inputs[slot];
-			if (!input.widget || !input[ignoreDblClick]) {
+			if (!input.getWidget?.() || !input[ignoreDblClick]) {
 				// Not a widget input or already handled input
-				if (!(input.type in ComfyWidgets) && !(input.widget.config?.[0] instanceof Array)) {
+				if (!(input.type in ComfyWidgets) && !(input.getWidget?.()?.config?.[0] instanceof Array)) {
 					return r; //also Not a ComfyWidgets input or combo (do nothing)
 				}
 			}
@@ -259,7 +276,7 @@ app.registerExtension({
 						// Add first widget
 						const o = outputs.nodes[0];
 						const slot = o.to.inputs[o.link.target_slot];
-						if (slot.widget) {
+						if (slot.getWidget) {
 							this.#onFirstConnection(o.link.id);
 						} else {
 							o.to.disconnectInput(o.link.target_slot);
@@ -281,7 +298,7 @@ app.registerExtension({
 					}
 					for (const { to, link } of nodes) {
 						const input = to.inputs[link.target_slot];
-						const widgetName = input.widget.name;
+						const widgetName = input.getWidget?.()?.name;
 						if (widgetName) {
 							const widget = to.widgets.find((w) => w.name === widgetName);
 							if (widget) {
@@ -301,10 +318,10 @@ app.registerExtension({
 						if (!this.widgets?.length) {
 							this.#onFirstConnection();
 						}
-						if (!this.widgets?.length && this.outputs[0].widget) {
+						if (!this.widgets?.length && this.outputs[0].getWidget?.()) {
 							// On first load it often cant recreate the widget as the other node doesnt exist yet
 							// Manually recreate it from the output info
-							this.#createWidget(this.outputs[0].widget.config);
+							this.#createWidget(this.outputs[0].getWidget?.().config);
 						}
 					}
 				} else if (!this.outputs[0].links?.length) {
@@ -319,7 +336,7 @@ app.registerExtension({
 				if (target_node.type === "Reroute") return true;
 
 				// No widget, we cant connect
-				if (!input.widget) {
+				if (!input.getWidget?.()) {
 					if (!(input.type in ComfyWidgets)) return false;
 				}
 
@@ -343,11 +360,11 @@ app.registerExtension({
 				if (!input) return;
 
 				var _widget;
-				if (!input.widget) {
+				if (!input.getWidget?.()) {
 					if (!(input.type in ComfyWidgets)) return;
 					_widget = { name: input.name, config: [input.type, {}] }; //fake widget
 				} else {
-					_widget = input.widget;
+					_widget = input.getWidget?.();
 				}
 
 				const widget = _widget;
@@ -355,7 +372,7 @@ app.registerExtension({
 				// Update our output to restrict to the widget type
 				this.outputs[0].type = linkType;
 				this.outputs[0].name = type;
-				this.outputs[0].widget = widget;
+				this.outputs[0].getWidget = () => widget;
 
 				this.#createWidget(widget.config, theirNode, widget.name);
 			}
@@ -420,7 +437,8 @@ app.registerExtension({
 				// it removes, then re-adds, causing it to break
 				this.outputs[0].type = "*";
 				this.outputs[0].name = "connect to widget input";
-				delete this.outputs[0].widget;
+				delete this.outputs[0].convertedWidget;
+				delete this.outputs[0].getWidget;
 				this.#widgetConfig = undefined;
 
 				if (this.widgets) {

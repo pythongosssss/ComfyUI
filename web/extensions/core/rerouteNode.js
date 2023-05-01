@@ -1,5 +1,4 @@
 import { app } from "/scripts/app.js";
-import { isValidConnection } from "/extensions/core/widgetInputs.js";
 
 // Node that allows you to redirect connections for cleaner graphs
 
@@ -127,7 +126,8 @@ app.registerExtension({
 					const output = allInputs.node.outputs[link.origin_slot];
 					type = output.type;
 					let label = type;
-					if (output.widget?.config?.[0] instanceof Array) {
+					const widget = output.getWidget?.();
+					if (widget?.config?.[0] instanceof Array) {
 						label = "COMBO";
 					}
 					if (type === "*") {
@@ -143,7 +143,8 @@ app.registerExtension({
 						const next = allOutputs.nodes[0];
 						const input = next.to.inputs[next.link.target_slot];
 						let label = type;
-						if (input.widget?.config?.[0] instanceof Array) {
+						const widget = input.getWidget?.();
+						if (widget?.config?.[0] instanceof Array) {
 							label = "COMBO";
 						}
 						updateType(input.type, label);
