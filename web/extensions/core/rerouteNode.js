@@ -23,14 +23,6 @@ app.registerExtension({
 				this.isVirtualNode = true;
 			}
 
-			onAdded() {
-				this.title = this.id;
-			}
-
-			onConfigure() {
-				this.title = this.id;
-			}
-
 			getRerouteOutputs() {
 				let reroutes = [];
 				let nodes = [];
@@ -84,12 +76,15 @@ app.registerExtension({
 				const allOutputs = (allInputs.reroutes[allInputs.reroutes.length - 1] || this).getRerouteOutputs();
 
 				const updateType = (type, label) => {
-					label = label || type;
+					if (this.properties.showOutputText) {
+						label = label || type;
+					} else {
+						label = "";
+					}
 					// Update all nodes in both directions from this node
 					for (const reroute of [...allInputs.reroutes, this, ...allOutputs.reroutes]) {
 						// Update the output type, never touch the input type
-						reroute.outputs[0].type = reroute.outputs[0].label = type;
-						reroute.outputs[0].label = label;
+						reroute.outputs[0].type = reroute.outputs[0].name = type;
 
 						const color = LGraphCanvas.link_type_colors[type];
 
@@ -108,6 +103,7 @@ app.registerExtension({
 						if (!reroute.outputs[0].links) continue;
 						for (const l of reroute.outputs[0].links) {
 							const link = app.graph.links[l];
+							if (!link) continue;
 							const to = app.graph.getNodeById(link.target_id);
 							if (type !== "*" && to.type !== "Reroute") {
 								if (to.inputs[link.target_slot].type !== type) {
@@ -200,7 +196,7 @@ app.registerExtension({
 						callback: () => {
 							this.properties.showOutputText = !this.properties.showOutputText;
 							if (this.properties.showOutputText) {
-								this.outputs[0].name = this.__outputType || this.outputs[0].type;
+								this.outputs[0].name = this.outputs[0].type;
 							} else {
 								this.outputs[0].name = "";
 							}
@@ -243,12 +239,8 @@ app.registerExtension({
 			}
 
 			computeSize() {
-				return [
-					this.properties.showOutputText && this.outputs && this.outputs.length
-						? Math.max(75, LiteGraph.NODE_TEXT_SIZE * this.outputs[0].name.length * 0.6 + 40)
-						: 75,
-					26,
-				];
+				const text = this.outputs?.[0]?.label || (this.properties.showOutputText && this.outputs?.[0]?.name) || "";
+				return [Math.max(75, LiteGraph.NODE_TEXT_SIZE * text.length * 0.6 + 40), 26];
 			}
 
 			static setDefaultTextVisibility(visible) {
