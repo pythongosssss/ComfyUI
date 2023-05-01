@@ -4,6 +4,37 @@ import { app } from "/scripts/app.js";
 const CONVERTED_TYPE = "converted-widget";
 const VALID_TYPES = ["STRING", "combo", "number"];
 
+export function isValidConnection(slot1, slot2) {
+	// Only allow connections where the configs match
+	const config1 = slot1.widget.config;
+	const config2 = slot2.widget.config;
+
+	if (config1[0] instanceof Array) {
+		// These checks shouldnt actually be necessary as the types should match
+		// but double checking doesn't hurt
+
+		// New input isnt a combo
+		if (!(config2[0] instanceof Array)) return false;
+		// New imput combo has a different size
+		if (config1[0].length !== config2[0].length) return false;
+		// New input combo has different elements
+		if (config1[0].find((v, i) => config2[0][i] !== v)) return false;
+	} else if (config1[0] !== config2[0]) {
+		// Configs dont match
+		return false;
+	}
+
+	for (const k in config1[1]) {
+		if (k !== "default") {
+			if (config1[1][k] !== config2[1][k]) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 function isConvertableWidget(widget, config) {
 	return VALID_TYPES.includes(widget.type) || VALID_TYPES.includes(config[0]);
 }
@@ -101,7 +132,8 @@ app.registerExtension({
 							callback: () => convertToWidget(this, w),
 						});
 					} else {
-						const config = nodeData?.input?.required[w.name] || nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
+						const config = nodeData?.input?.required[w.name] ||
+							nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
 						if (isConvertableWidget(w, config)) {
 							toInput.push({
 								content: `Convert ${w.name} to input`,
@@ -123,10 +155,9 @@ app.registerExtension({
 		};
 
 		// On initial configure of nodes hide all converted widgets
-		const origOnConfigure = nodeType.prototype.onConfigure;
-		nodeType.prototype.onConfigure = function () {
-			const r = origOnConfigure ? origOnConfigure.apply(this, arguments) : undefined;
-
+		const origOnBeforeConfigureLinks = nodeType.prototype.origOnBeforeConfigureLinks;
+		nodeType.prototype.onBeforeConfigureLinks = function () {
+			const r = origOnBeforeConfigureLinks ? origOnBeforeConfigureLinks.apply(this, arguments) : undefined;
 			if (this.inputs) {
 				for (const input of this.inputs) {
 					if (input.widget) {
@@ -134,7 +165,7 @@ app.registerExtension({
 						if (w) {
 							hideWidget(this, w);
 						} else {
-							convertToWidget(this, input)
+							convertToWidget(this, input);
 						}
 					}
 				}
@@ -191,10 +222,50 @@ app.registerExtension({
 	},
 	registerCustomNodes() {
 		class PrimitiveNode {
+			#widgetConfig;
+
 			constructor() {
 				this.addOutput("connect to widget input", "*");
 				this.serialize_widgets = true;
 				this.isVirtualNode = true;
+			}
+
+			onRerouteChanged(inputs, outputs) {
+				if (!outputs.nodes.length) {
+					// We have no reroute outputs
+					let isLast = true;
+					// Check if we have any non reroute connections
+					for (const l of this.outputs[0].links || []) {
+						const link = app.graph.links[l];
+						const node = app.graph.getNodeById(link.target_id);
+						if (node.type !== "Reroute") {
+							isLast = false;
+							break;
+						}
+					}
+					if (isLast) {
+						this.#onLastDisconnect();
+					}
+				} else {
+					if (this.#widgetConfig) {
+						// We already have a widget, validate all connections match
+						for (const o of outputs.nodes) {
+							const slot = o.to.inputs[o.link.target_slot];
+							if (!isValidConnection(slot, this.outputs[0])) {
+								o.to.disconnectInput(o.link.target_slot);
+							}
+						}
+					} else {
+						// Add first widget
+						const o = outputs.nodes[0];
+						const slot = o.to.inputs[o.link.target_slot];
+						if (slot.widget) {
+							this.#onFirstConnection(o.link.id);
+						} else {
+							o.to.disconnectInput(o.link.target_slot);
+						}
+					}
+				}
 			}
 
 			applyToGraph() {
@@ -203,15 +274,21 @@ app.registerExtension({
 				// For each output link copy our value over the original widget value
 				for (const l of this.outputs[0].links) {
 					const linkInfo = app.graph.links[l];
-					const node = this.graph.getNodeById(linkInfo.target_id);
-					const input = node.inputs[linkInfo.target_slot];
-					const widgetName = input.widget.name;
-					if (widgetName) {
-						const widget = node.widgets.find((w) => w.name === widgetName);
-						if (widget) {
-							widget.value = this.widgets[0].value;
-							if (widget.callback) {
-								widget.callback(widget.value, app.canvas, node, app.canvas.graph_mouse, {});
+					const outerNode = this.graph.getNodeById(linkInfo.target_id);
+					let nodes = [{ to: outerNode, link: linkInfo }];
+					if (outerNode.type === "Reroute") {
+						nodes = outerNode.getRerouteOutputs().nodes;
+					}
+					for (const { to, link } of nodes) {
+						const input = to.inputs[link.target_slot];
+						const widgetName = input.widget.name;
+						if (widgetName) {
+							const widget = to.widgets.find((w) => w.name === widgetName);
+							if (widget) {
+								widget.value = this.widgets[0].value;
+								if (widget.callback) {
+									widget.callback(widget.value, app.canvas, to, app.canvas.graph_mouse, {});
+								}
 							}
 						}
 					}
@@ -238,19 +315,24 @@ app.registerExtension({
 			onConnectOutput(slot, type, input, target_node, target_slot) {
 				// Fires before the link is made allowing us to reject it if it isn't valid
 
+				// Always allow reroutes
+				if (target_node.type === "Reroute") return true;
+
 				// No widget, we cant connect
 				if (!input.widget) {
 					if (!(input.type in ComfyWidgets)) return false;
 				}
 
 				if (this.outputs[slot].links?.length) {
-					return this.#isValidConnection(input);
+					return isValidConnection(this.outputs[slot], input);
 				}
 			}
 
-			#onFirstConnection() {
+			#onFirstConnection(linkId = null) {
 				// First connection can fire before the graph is ready on initial load so random things can be missing
-				const linkId = this.outputs[0].links[0];
+				if (linkId == null) {
+					linkId = this.outputs[0].links[0];
+				}
 				const link = this.graph.links[linkId];
 				if (!link) return;
 
@@ -260,11 +342,10 @@ app.registerExtension({
 				const input = theirNode.inputs[link.target_slot];
 				if (!input) return;
 
-
 				var _widget;
 				if (!input.widget) {
 					if (!(input.type in ComfyWidgets)) return;
-					_widget = { "name": input.name, "config": [input.type, {}] }//fake widget
+					_widget = { name: input.name, config: [input.type, {}] }; //fake widget
 				} else {
 					_widget = input.widget;
 				}
@@ -280,6 +361,8 @@ app.registerExtension({
 			}
 
 			#createWidget(inputData, node, widgetName) {
+				this.#widgetConfig = inputData;
+
 				let type = inputData[0];
 
 				if (type instanceof Array) {
@@ -290,7 +373,7 @@ app.registerExtension({
 				if (type in ComfyWidgets) {
 					widget = (ComfyWidgets[type](this, "value", inputData, app) || {}).widget;
 				} else {
-					widget = this.addWidget(type, "value", null, () => { }, {});
+					widget = this.addWidget(type, "value", null, () => {}, {});
 				}
 
 				if (node?.widgets && widget) {
@@ -330,43 +413,15 @@ app.registerExtension({
 				});
 			}
 
-			#isValidConnection(input) {
-				// Only allow connections where the configs match
-				const config1 = this.outputs[0].widget.config;
-				const config2 = input.widget.config;
-
-				if (config1[0] instanceof Array) {
-					// These checks shouldnt actually be necessary as the types should match
-					// but double checking doesn't hurt
-
-					// New input isnt a combo
-					if (!(config2[0] instanceof Array)) return false;
-					// New imput combo has a different size
-					if (config1[0].length !== config2[0].length) return false;
-					// New input combo has different elements
-					if (config1[0].find((v, i) => config2[0][i] !== v)) return false;
-				} else if (config1[0] !== config2[0]) {
-					// Configs dont match
-					return false;
-				}
-
-				for (const k in config1[1]) {
-					if (k !== "default") {
-						if (config1[1][k] !== config2[1][k]) {
-							return false;
-						}
-					}
-				}
-
-				return true;
-			}
-
 			#onLastDisconnect() {
+				if (this.outputs[0].type === "*") return;
+
 				// We cant remove + re-add the output here as if you drag a link over the same link
 				// it removes, then re-adds, causing it to break
 				this.outputs[0].type = "*";
 				this.outputs[0].name = "connect to widget input";
 				delete this.outputs[0].widget;
+				this.#widgetConfig = undefined;
 
 				if (this.widgets) {
 					// Allow widgets to cleanup
@@ -376,6 +431,16 @@ app.registerExtension({
 						}
 					}
 					this.widgets.length = 0;
+				}
+
+				// If we still have nodes when disconnecting trigger updates to them
+				// These will be reroutes that need their type updating
+				if (this.outputs[0].links) {
+					for (const l of this.outputs[0].links) {
+						const link = app.graph.links[l];
+						const node = app.graph.getNodeById(link.target_id);
+						node.updateLinks?.();
+					}
 				}
 			}
 		}

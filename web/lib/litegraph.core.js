@@ -2469,6 +2469,10 @@
             this.title = this.constructor.title;
         }
 
+        if (this.onBeforeConfigureLinks) {
+            this.onBeforeConfigureLinks(info);
+        }
+
 		if (this.inputs) {
 			for (var i = 0; i < this.inputs.length; ++i) {
 				var input = this.inputs[i];
