@@ -119,17 +119,19 @@ app.registerExtension({
 					// We have a valid input so use that
 					const prev = allInputs[allInputs.length - 2] || this;
 					const link = app.graph.links[prev.inputs[0].link];
-					const output = allInputs.node.outputs[link.origin_slot];
-					type = output.type;
-					let label = type;
-					const widget = output.getWidget?.();
-					if (widget?.config?.[0] instanceof Array) {
-						label = "COMBO";
-					}
-					if (type === "*") {
-						type = null;
-					} else {
-						updateType(type, label);
+					if (link) {
+						const output = allInputs.node.outputs[link.origin_slot];
+						type = output.type;
+						let label = type;
+						const widget = output.getWidget?.();
+						if (widget?.config?.[0] instanceof Array) {
+							label = "COMBO";
+						}
+						if (type === "*") {
+							type = null;
+						} else {
+							updateType(type, label);
+						}
 					}
 				}
 
