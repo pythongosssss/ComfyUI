@@ -40,6 +40,8 @@ function isConvertableWidget(widget, config) {
 }
 
 export function hideWidget(node, widget, suffix = "", disableSerialize = true) {
+	if (widget.origType) return;
+
 	widget.origType = widget.type;
 	widget.origComputeSize = widget.computeSize;
 	widget.computeSize = () => [0, -4]; // -4 is due to the gap litegraph adds between widgets automatically
