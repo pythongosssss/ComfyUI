@@ -120,7 +120,8 @@ app.registerExtension({
 					const prev = allInputs[allInputs.length - 2] || this;
 					const link = app.graph.links[prev.inputs[0].link];
 					if (link) {
-						const output = allInputs.node.outputs[link.origin_slot];
+						const n = app.graph.getNodeById(link.origin_id);
+						const output = n.outputs[link.origin_slot];
 						type = output.type;
 						let label = type;
 						const widget = output.getWidget?.();
