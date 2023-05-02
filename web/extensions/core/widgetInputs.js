@@ -40,6 +40,7 @@ function isConvertableWidget(widget, config) {
 }
 
 function hideWidget(node, widget, suffix = "") {
+	if (widget.origType) return;
 	widget.origType = widget.type;
 	widget.origComputeSize = widget.computeSize;
 	widget.origSerializeValue = widget.serializeValue;
