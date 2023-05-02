@@ -6,6 +6,7 @@ import { getPngMetadata, importA1111 } from "./pnginfo.js";
 
 /** 
  * @typedef {import("types/comfy").ComfyExtension} ComfyExtension
+ * @typedef {import("types/litegraph").LGraph} LGraph
  */
 
 export class ComfyApp {
@@ -105,7 +106,9 @@ export class ComfyApp {
 	 * @param {*} node The node to add the menu handler
 	 */
 	#addNodeContextMenuHandler(node) {
+		const orig = node.prototype.getExtraMenuOptions;
 		node.prototype.getExtraMenuOptions = function (_, options) {
+			const r = orig?.apply?.(this, arguments);
 			if (this.imgs) {
 				// If this node has images then we add an open in new tab item
 				let img;
@@ -213,6 +216,7 @@ export class ComfyApp {
 					}
 				);
 			}
+			return r;
 		};
 	}
 
@@ -314,7 +318,17 @@ export class ComfyApp {
 					if (this.imageOffset != null) {
 						shiftY = this.imageOffset;
 					} else {
-						shiftY = this.computeSize()[1];
+						if (this.widgets?.length) {
+							const w = this.widgets[this.widgets.length - 1];
+							shiftY = w.last_y;
+							if (w.computeSize) {
+								shiftY += w.computeSize()[1] + 4;
+							} else {
+								shiftY += LiteGraph.NODE_WIDGET_HEIGHT + 4;
+							}
+						} else {
+							shiftY = this.computeSize()[1];
+						}
 					}
 
 					let dw = this.size[0];
@@ -552,7 +566,7 @@ export class ComfyApp {
 			this.selected_group_moving = false;
 
 			if (this.selected_group && !this.selected_group_resizing) {
-				var font_size =
+				var font_size = 
 					this.selected_group.font_size || LiteGraph.DEFAULT_GROUP_FONT_SIZE;
 				var height = font_size * 1.4;
 
@@ -828,7 +842,12 @@ export class ComfyApp {
 
 		this.#addProcessMouseHandler();
 		this.#addProcessKeyHandler();
+		this.#addApiUpdateHandlers();
 
+		/**
+		 * The LiteGraph graph object
+		 * @type {LGraph}
+		 */
 		this.graph = new LGraph();
 		const canvas = (this.canvas = new LGraphCanvas(canvasEl, this.graph));
 		this.ctx = canvasEl.getContext("2d");
@@ -874,7 +893,6 @@ export class ComfyApp {
 
 		this.#addDrawNodeHandler();
 		this.#addDrawGroupsHandler();
-		this.#addApiUpdateHandlers();
 		this.#addDropHandler();
 		this.#addPasteHandler();
 		this.#addKeyboardHandler();
@@ -948,13 +966,12 @@ export class ComfyApp {
 				{
 					title: nodeData.display_name || nodeData.name,
 					comfyClass: nodeData.name,
+					nodeData
 				}
 			);
 			node.prototype.comfyClass = nodeData.name;
 
-			this.#addNodeContextMenuHandler(node);
-			this.#addDrawBackgroundHandler(node, app);
-			this.#addNodeKeyHandler(node);
+			this.addCustomNodeHandlers(node);
 
 			await this.#invokeExtensionsAsync("beforeRegisterNodeDef", node, nodeData);
 			LiteGraph.registerNodeType(nodeId, node);
@@ -962,6 +979,12 @@ export class ComfyApp {
 		}
 
 		await this.#invokeExtensionsAsync("registerCustomNodes");
+	}
+
+	addCustomNodeHandlers(node) {
+		this.#addNodeContextMenuHandler(node);
+		this.#addDrawBackgroundHandler(node, this);
+		this.#addNodeKeyHandler(node);
 	}
 
 	/**
@@ -1090,59 +1113,61 @@ export class ComfyApp {
 		const workflow = this.graph.serialize();
 		const output = {};
 		// Process nodes in order of execution
-		for (const node of this.graph.computeExecutionOrder(false)) {
-			const n = workflow.nodes.find((n) => n.id === node.id);
-
-			if (node.isVirtualNode) {
-				// Don't serialize frontend only nodes but let them make changes
-				if (node.applyToGraph) {
-					node.applyToGraph(workflow);
-				}
-				continue;
-			}
-
-			if (node.mode === 2) {
-				// Don't serialize muted nodes
-				continue;
-			}
-
-			const inputs = {};
-			const widgets = node.widgets;
-
-			// Store all widget values
-			if (widgets) {
-				for (const i in widgets) {
-					const widget = widgets[i];
-					if (!widget.options || widget.options.serialize !== false) {
-						inputs[widget.name] = widget.serializeValue ? await widget.serializeValue(n, i) : widget.value;
+		for (const outerNode of this.graph.computeExecutionOrder(false)) {
+			const n = workflow.nodes.find((n) => n.id === outerNode.id);
+			const innerNodes = outerNode.getInnerNodes ? outerNode.getInnerNodes() : [outerNode];
+			for (const node of innerNodes) {
+				if (node.isVirtualNode) {
+					// Don't serialize frontend only nodes but let them make changes
+					if (node.applyToGraph) {
+						node.applyToGraph(workflow);
 					}
+					continue;
 				}
-			}
 
-			// Store all node links
-			for (let i in node.inputs) {
-				let parent = node.getInputNode(i);
-				if (parent) {
-					let link = node.getInputLink(i);
-					while (parent && parent.isVirtualNode) {
-						link = parent.getInputLink(link.origin_slot);
-						if (link) {
-							parent = parent.getInputNode(link.origin_slot);
-						} else {
-							parent = null;
+				if (node.mode === 2) {
+					// Don't serialize muted nodes
+					continue;
+				}
+
+				const inputs = {};
+				const widgets = node.widgets;
+
+				// Store all widget values
+				if (widgets) {
+					for (const i in widgets) {
+						const widget = widgets[i];
+						if (!widget.options || widget.options.serialize !== false) {
+							inputs[widget.name] = widget.serializeValue ? await widget.serializeValue(n, i) : widget.value;
 						}
 					}
+				}
 
-					if (link) {
-						inputs[node.inputs[i].name] = [String(link.origin_id), parseInt(link.origin_slot)];
+				// Store all node links
+				for (let i in node.inputs) {
+					let parent = node.getInputNode(i);
+					if (parent) {
+						let link = node.getInputLink(i);
+						while (parent && parent.isVirtualNode) {
+							link = parent.getInputLink(link.origin_slot);
+							if (link) {
+								parent = parent.getInputNode(link.target_slot);
+							} else {
+								parent = null;
+							}
+						}
+
+						if (link) {
+							inputs[node.inputs[i].name] = [String(link.origin_id), parseInt(link.origin_slot)];
+						}
 					}
 				}
-			}
 
-			output[String(node.id)] = {
-				inputs,
-				class_type: node.comfyClass,
-			};
+				output[String(node.id)] = {
+					inputs,
+					class_type: node.comfyClass,
+				};
+			}
 		}
 
 		// Remove inputs connected to removed nodes
@@ -1184,13 +1209,15 @@ export class ComfyApp {
 					}
 
 					for (const n of p.workflow.nodes) {
-						const node = graph.getNodeById(n.id);
-						if (node.widgets) {
-							for (const widget of node.widgets) {
-								// Allow widgets to run callbacks after a prompt has been queued
-								// e.g. random seed after every gen
-								if (widget.afterQueued) {
-									widget.afterQueued();
+						const outerNode = graph.getNodeById(n.id);
+						for (const node of [outerNode, ...outerNode.getInnerNodes?.() || []]) {
+							if (node.widgets) {
+								for (const widget of node.widgets) {
+									// Allow widgets to run callbacks after a prompt has been queued
+									// e.g. random seed after every gen
+									if (widget.afterQueued) {
+										widget.afterQueued();
+									}
 								}
 							}
 						}

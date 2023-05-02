@@ -39,20 +39,22 @@ function isConvertableWidget(widget, config) {
 	return VALID_TYPES.includes(widget.type) || VALID_TYPES.includes(config[0]);
 }
 
-function hideWidget(node, widget, suffix = "") {
+export function hideWidget(node, widget, suffix = "", disableSerialize = true) {
 	widget.origType = widget.type;
 	widget.origComputeSize = widget.computeSize;
-	widget.origSerializeValue = widget.serializeValue;
 	widget.computeSize = () => [0, -4]; // -4 is due to the gap litegraph adds between widgets automatically
 	widget.type = CONVERTED_TYPE + suffix;
-	widget.serializeValue = () => {
-		// Prevent serializing the widget if we have no input linked
-		const { link } = node.inputs.find((i) => i.getWidget?.()?.name === widget.name);
-		if (link == null) {
-			return undefined;
-		}
-		return widget.origSerializeValue ? widget.origSerializeValue() : widget.value;
-	};
+	if (disableSerialize) {
+		widget.origSerializeValue = widget.serializeValue;
+		widget.serializeValue = () => {
+			// Prevent serializing the widget if we have no input linked
+			const { link } = node.inputs.find((i) => i.getWidget?.()?.name === widget.name);
+			if (link == null) {
+				return undefined;
+			}
+			return widget.origSerializeValue ? widget.origSerializeValue() : widget.value;
+		};
+	}
 
 	// Hide any linked widgets, e.g. seed+seedControl
 	if (widget.linkedWidgets) {
@@ -62,7 +64,7 @@ function hideWidget(node, widget, suffix = "") {
 	}
 }
 
-function showWidget(widget) {
+export function showWidget(widget) {
 	widget.type = widget.origType;
 	widget.computeSize = widget.origComputeSize;
 	widget.serializeValue = widget.origSerializeValue;
@@ -156,13 +158,9 @@ app.registerExtension({
 			return r;
 		};
 
-		// On initial configure of nodes hide all converted widgets
-		const onConfigure = nodeType.prototype.onConfigure;
-		nodeType.prototype.onConfigure = function () {
-			const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
-			const self = this;
-			if (self.inputs) {
-				for (const input of self.inputs) {
+		function configureWidgets(node) {
+			if (node.inputs) {
+				for (const input of node.inputs) {
 					if (input.widget) {
 						// Migrate old widget data
 						input.convertedWidget = input.widget.name;
@@ -173,21 +171,35 @@ app.registerExtension({
 
 					// Find any widget inputs and store a reference to the widget on the input
 					if (input.convertedWidget) {
-						const w = self.widgets.find((w) => w.name === input.convertedWidget);
+						const w = node.widgets.find((w) => w.name === input.convertedWidget);
 						if (w) {
 							const config = nodeData?.input?.required[w.name] ||
 								nodeData?.input?.optional?.[w.name] || [w.type, w.options || {}];
 
 							input.getWidget = () => ({ name: w.name, config });
 
-							hideWidget(self, w);
+							hideWidget(node, w);
 						} else {
-							convertToWidget(self, input);
+							convertToWidget(node, input);
 						}
 					}
 				}
 			}
+		}
 
+		// On initial configure of nodes hide all converted widgets
+		const origOnConfigure = nodeType.prototype.onConfigure;
+		nodeType.prototype.onConfigure = function () {
+			const r = origOnConfigure ? origOnConfigure.apply(this, arguments) : undefined;
+			configureWidgets(this);
+			return r;
+		};
+
+		// When a new node is added, it might already have converted widgets (e.g. group node)
+		const origOnAdded = nodeType.prototype.onAdded;
+		nodeType.prototype.onAdded = function () {
+			const r = origOnAdded?.apply?.(this, arguments);
+			configureWidgets(this);
 			return r;
 		};
 
