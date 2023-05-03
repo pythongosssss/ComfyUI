@@ -204,9 +204,9 @@ app.registerExtension({
 						callback: () => {
 							this.properties.showOutputText = !this.properties.showOutputText;
 							if (this.properties.showOutputText) {
-								this.outputs[0].name = this.outputs[0].type;
+								this.outputs[0].label = this.outputs[0].type;
 							} else {
-								this.outputs[0].name = "";
+								this.outputs[0].label = "";
 							}
 							this.size = this.computeSize();
 							this.applyOrientation();
