@@ -168,7 +168,7 @@ app.registerExtension({
 						// Migrate old widget data
 						input.convertedWidget = input.widget.name;
 						const w = input.widget;
-						input.getWidget = () => input.widget;
+						input.getWidget = () => w;
 						delete input.widget;
 					}
 
