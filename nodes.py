@@ -5,6 +5,7 @@ import sys
 import json
 import hashlib
 import traceback
+import math
 
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -59,14 +60,44 @@ class ConditioningCombine:
     def combine(self, conditioning_1, conditioning_2):
         return (conditioning_1 + conditioning_2, )
 
+class ConditioningAverage :
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning_to": ("CONDITIONING", ), "conditioning_from": ("CONDITIONING", ),
+                              "conditioning_to_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01})
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "addWeighted"
+
+    CATEGORY = "conditioning"
+
+    def addWeighted(self, conditioning_to, conditioning_from, conditioning_to_strength):
+        out = []
+
+        if len(conditioning_from) > 1:
+            print("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+
+        cond_from = conditioning_from[0][0]
+
+        for i in range(len(conditioning_to)):
+            t1 = conditioning_to[i][0]
+            t0 = cond_from[:,:t1.shape[1]]
+            if t0.shape[1] < t1.shape[1]:
+                t0 = torch.cat([t0] + [torch.zeros((1, (t1.shape[1] - t0.shape[1]), t1.shape[2]))], dim=1)
+
+            tw = torch.mul(t1, conditioning_to_strength) + torch.mul(t0, (1.0 - conditioning_to_strength))
+            n = [tw, conditioning_to[i][1].copy()]
+            out.append(n)
+        return (out, )
+
 class ConditioningSetArea:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"conditioning": ("CONDITIONING", ),
-                              "width": ("INT", {"default": 64, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
-                              "height": ("INT", {"default": 64, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
-                              "x": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 64}),
-                              "y": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 64}),
+                              "width": ("INT", {"default": 64, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                              "height": ("INT", {"default": 64, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                              "x": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
+                              "y": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
                               "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                              }}
     RETURN_TYPES = ("CONDITIONING",)
@@ -157,15 +188,20 @@ class VAEEncode:
 
     CATEGORY = "latent"
 
-    def encode(self, vae, pixels):
-        x = (pixels.shape[1] // 64) * 64
-        y = (pixels.shape[2] // 64) * 64
+    @staticmethod
+    def vae_encode_crop_pixels(pixels):
+        x = (pixels.shape[1] // 8) * 8
+        y = (pixels.shape[2] // 8) * 8
         if pixels.shape[1] != x or pixels.shape[2] != y:
-            pixels = pixels[:,:x,:y,:]
+            x_offset = (pixels.shape[1] % 8) // 2
+            y_offset = (pixels.shape[2] % 8) // 2
+            pixels = pixels[:, x_offset:x + x_offset, y_offset:y + y_offset, :]
+        return pixels
+
+    def encode(self, vae, pixels):
+        pixels = self.vae_encode_crop_pixels(pixels)
         t = vae.encode(pixels[:,:,:,:3])
-
         return ({"samples":t}, )
-
 
 class VAEEncodeTiled:
     def __init__(self, device="cpu"):
@@ -180,38 +216,43 @@ class VAEEncodeTiled:
     CATEGORY = "_for_testing"
 
     def encode(self, vae, pixels):
-        x = (pixels.shape[1] // 64) * 64
-        y = (pixels.shape[2] // 64) * 64
-        if pixels.shape[1] != x or pixels.shape[2] != y:
-            pixels = pixels[:,:x,:y,:]
+        pixels = VAEEncode.vae_encode_crop_pixels(pixels)
         t = vae.encode_tiled(pixels[:,:,:,:3])
-
         return ({"samples":t}, )
+
 class VAEEncodeForInpaint:
     def __init__(self, device="cpu"):
         self.device = device
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "pixels": ("IMAGE", ), "vae": ("VAE", ), "mask": ("MASK", )}}
+        return {"required": { "pixels": ("IMAGE", ), "vae": ("VAE", ), "mask": ("MASK", ), "grow_mask_by": ("INT", {"default": 6, "min": 0, "max": 64, "step": 1}),}}
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "encode"
 
     CATEGORY = "latent/inpaint"
 
-    def encode(self, vae, pixels, mask):
-        x = (pixels.shape[1] // 64) * 64
-        y = (pixels.shape[2] // 64) * 64
+    def encode(self, vae, pixels, mask, grow_mask_by=6):
+        x = (pixels.shape[1] // 8) * 8
+        y = (pixels.shape[2] // 8) * 8
         mask = torch.nn.functional.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), size=(pixels.shape[1], pixels.shape[2]), mode="bilinear")
 
         pixels = pixels.clone()
         if pixels.shape[1] != x or pixels.shape[2] != y:
-            pixels = pixels[:,:x,:y,:]
-            mask = mask[:,:,:x,:y]
+            x_offset = (pixels.shape[1] % 8) // 2
+            y_offset = (pixels.shape[2] % 8) // 2
+            pixels = pixels[:,x_offset:x + x_offset, y_offset:y + y_offset,:]
+            mask = mask[:,:,x_offset:x + x_offset, y_offset:y + y_offset]
 
         #grow mask by a few pixels to keep things seamless in latent space
-        kernel_tensor = torch.ones((1, 1, 6, 6))
-        mask_erosion = torch.clamp(torch.nn.functional.conv2d(mask.round(), kernel_tensor, padding=3), 0, 1)
+        if grow_mask_by == 0:
+            mask_erosion = mask
+        else:
+            kernel_tensor = torch.ones((1, 1, grow_mask_by, grow_mask_by))
+            padding = math.ceil((grow_mask_by - 1) / 2)
+
+            mask_erosion = torch.clamp(torch.nn.functional.conv2d(mask.round(), kernel_tensor, padding=padding), 0, 1)
+
         m = (1.0 - mask.round()).squeeze(1)
         for i in range(3):
             pixels[:,:,:,i] -= 0.5
@@ -573,8 +614,8 @@ class EmptyLatentImage:
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
-                              "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
+        return {"required": { "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                              "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                               "batch_size": ("INT", {"default": 1, "min": 1, "max": 64})}}
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generate"
@@ -612,8 +653,8 @@ class LatentUpscale:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "samples": ("LATENT",), "upscale_method": (s.upscale_methods,),
-                              "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
-                              "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
+                              "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                              "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                               "crop": (s.crop_methods,)}}
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "upscale"
@@ -715,8 +756,8 @@ class LatentCrop:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "samples": ("LATENT",),
-                              "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
-                              "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 64}),
+                              "width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                              "height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                               "x": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
                               "y": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
                               }}
@@ -741,16 +782,6 @@ class LatentCrop:
         new_width = width // 8
         to_x = new_width + x
         to_y = new_height + y
-        def enforce_image_dim(d, to_d, max_d):
-            if to_d > max_d:
-                leftover = (to_d - max_d) % 8
-                to_d = max_d
-                d -= leftover
-            return (d, to_d)
-
-        #make sure size is always multiple of 64
-        x, to_x = enforce_image_dim(x, to_x, samples.shape[3])
-        y, to_y = enforce_image_dim(y, to_y, samples.shape[2])
         s['samples'] = samples[:,:,y:to_y, x:to_x]
         return (s,)
 
@@ -784,9 +815,13 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
     if "noise_mask" in latent:
         noise_mask = latent["noise_mask"]
 
+    pbar = comfy.utils.ProgressBar(steps)
+    def callback(step, x0, x):
+        pbar.update_absolute(step + 1)
+
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask)
+                                  force_full_denoise=force_full_denoise, noise_mask=noise_mask, callback=callback)
     out = latent.copy()
     out["samples"] = samples
     return (out, )
@@ -1068,10 +1103,10 @@ class ImagePadForOutpaint:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "left": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 64}),
-                "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 64}),
-                "right": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 64}),
-                "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 64}),
+                "left": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
+                "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
+                "right": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
+                "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
                 "feathering": ("INT", {"default": 40, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
             }
         }
@@ -1143,6 +1178,7 @@ NODE_CLASS_MAPPINGS = {
     "ImageScale": ImageScale,
     "ImageInvert": ImageInvert,
     "ImagePadForOutpaint": ImagePadForOutpaint,
+    "ConditioningAverage ": ConditioningAverage ,
     "ConditioningCombine": ConditioningCombine,
     "ConditioningSetArea": ConditioningSetArea,
     "ConditioningSetMask": ConditioningSetMask,
@@ -1194,6 +1230,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CLIPTextEncode": "CLIP Text Encode (Prompt)",
     "CLIPSetLastLayer": "CLIP Set Last Layer",
     "ConditioningCombine": "Conditioning (Combine)",
+    "ConditioningAverage ": "Conditioning (Average)",
     "ConditioningSetArea": "Conditioning (Set Area)",
     "ConditioningSetMask": "Conditioning (Set Mask)",
     "ControlNetApply": "Apply ControlNet",
