@@ -84,7 +84,8 @@ app.registerExtension({
 					// Update all nodes in both directions from this node
 					for (const reroute of [...allInputs.reroutes, this, ...allOutputs.reroutes]) {
 						// Update the output type, never touch the input type
-						reroute.outputs[0].type = reroute.outputs[0].name = type;
+						reroute.outputs[0].type = type;
+						reroute.outputs[0].label = label;
 
 						const color = LGraphCanvas.link_type_colors[type];
 
@@ -111,6 +112,8 @@ app.registerExtension({
 								}
 							}
 						}
+
+						reroute.setSize(reroute.computeSize());
 					}
 				};
 
@@ -123,7 +126,7 @@ app.registerExtension({
 						const n = app.graph.getNodeById(link.origin_id);
 						const output = n.outputs[link.origin_slot];
 						type = output.type;
-						let label = type;
+						let label = output.label || type;
 						const widget = output.getWidget?.();
 						if (widget?.config?.[0] instanceof Array) {
 							label = "COMBO";
@@ -152,6 +155,8 @@ app.registerExtension({
 						updateType("*");
 					}
 				}
+
+				this.setSize(this.computeSize());
 
 				allInputs.node?.onRerouteChanged?.(allInputs, allOutputs);
 			}
