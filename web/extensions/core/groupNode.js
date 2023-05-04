@@ -245,10 +245,6 @@ class GroupNode {
 			}
 		}
 
-		if (type === "*") {
-			type = node.__outputType;
-		}
-
 		if (!name) {
 			name = output.label || output.name || type;
 		}
@@ -291,9 +287,19 @@ class GroupNode {
 				}
 				if (node.type === "Reroute") {
 					({ name, type } = this.#getRerouteInfo(node, i, name, type));
+					if (!getWidget) {
+						const inputs = node.getRerouteInputs();
+						if (inputs?.node?.type === "PrimitiveNode" && inputs.node.outputs[0]) {
+							({ convertedWidget, getWidget } = inputs.node.outputs[0]);
+						}
+					}
 					if (!name) {
 						name = input.type;
 					}
+				}
+
+				if (type === "INT" && !getWidget) {
+					this.#getRerouteInfo(node, i, name, type);
 				}
 
 				this.addInput(name, type, {
