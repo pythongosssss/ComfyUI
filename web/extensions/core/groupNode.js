@@ -285,7 +285,7 @@ class GroupNode {
 
 			if (addInput) {
 				// Get connected type from reroute nodes
-				let { name, type, widget } = input;
+				let { name, type, convertedWidget, getWidget } = input;
 				if (input.label) {
 					name = input.label;
 				}
@@ -297,7 +297,8 @@ class GroupNode {
 				}
 
 				this.addInput(name, type, {
-					widget: widget ? { ...widget, name: node.title + " " + widget.name } : undefined,
+					convertedWidget,
+					getWidget,
 					for: {
 						id: node.id,
 						slot: i,
