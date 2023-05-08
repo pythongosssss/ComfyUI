@@ -414,6 +414,9 @@ export class ComfyApp {
 						}
 					} else {
 						// Draw individual
+						w = this.imgs[imageIndex].naturalWidth;
+						h = this.imgs[imageIndex].naturalHeight;
+
 						const scaleX = dw / w;
 						const scaleY = dh / h;
 						const scale = Math.min(scaleX, scaleY, 1);

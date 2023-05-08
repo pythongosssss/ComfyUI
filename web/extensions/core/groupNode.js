@@ -23,6 +23,9 @@ class GroupNode {
 	/** @type { LGraphNode | null } */
 	#runningNode = null;
 
+	#runNodes = new Set();
+	#runOutputs = {};
+
 	serialize_widgets = true;
 	isVirtualNode = true;
 
@@ -353,6 +356,12 @@ class GroupNode {
 	#handleExecuting = ({ detail }) => {
 		const node = this.#internalNodeLookup[detail + ""];
 		if (node) {
+			if (this.#runNodes.has(detail)) {
+				this.#runOutputs = {};
+				this.#runNodes = new Set();
+			}
+			this.#runNodes.add(detail);
+
 			this.#runningNode = node;
 			app.runningNodeId = this.id;
 			app.graph.setDirtyCanvas(true, false);
@@ -364,10 +373,11 @@ class GroupNode {
 	#handleExecuted = ({ detail }) => {
 		const node = this.#newToOldId[detail.node + ""];
 		if (node) {
-			if (!app.nodeOutputs[this.id]) {
-				app.nodeOutputs[this.id] = detail.output;
+			if (detail.output?.images) {
+				this.#runOutputs.images = [...(this.#runOutputs.images || []), ...detail.output.images];
+				app.nodeOutputs[this.id] = this.#runOutputs;
 			} else {
-				Object.assign(app.nodeOutputs[this.id], detail.output);
+				app.nodeOutputs[this.id] = Object.assign(this.#runOutputs, detail.output);
 			}
 			node.onExecuted?.(detail.output);
 			app.graph.setDirtyCanvas(true, false);
