@@ -261,21 +261,50 @@ export const ComfyWidgets = {
 		let uploadWidget;
 
 		function showImage(name) {
-			// Position the image somewhere sensible
-			if (!node.imageOffset) {
-				node.imageOffset = uploadWidget.last_y ? uploadWidget.last_y + 25 : 75;
-			}
-
 			const img = new Image();
 			img.onload = () => {
 				node.imgs = [img];
 				app.graph.setDirtyCanvas(true);
 			};
-			img.src = `/view?filename=${name}&type=input`;
-			if ((node.size[1] - node.imageOffset) < 100) {
-				node.size[1] = 250 + node.imageOffset;
+			let folder_separator = name.lastIndexOf("/");
+			let subfolder = "";
+			if (folder_separator > -1) {
+				subfolder = name.substring(0, folder_separator);
+				name = name.substring(folder_separator + 1);
 			}
+			img.src = `/view?filename=${name}&type=input&subfolder=${subfolder}`;
+			node.setSizeForImage?.();
 		}
+
+		var default_value = imageWidget.value;
+		Object.defineProperty(imageWidget, "value", {
+			set : function(value) {
+				this._real_value = value;
+			},
+
+			get : function() {
+				let value = "";
+				if (this._real_value) {
+					value = this._real_value;
+				} else {
+					return default_value;
+				}
+
+				if (value.filename) {
+					let real_value = value;
+					value = "";
+					if (real_value.subfolder) {
+						value = real_value.subfolder + "/";
+					}
+
+					value += real_value.filename;
+
+					if(real_value.type && real_value.type !== "input")
+						value += ` [${real_value.type}]`;
+				}
+				return value;
+			}
+		});
 
 		// Add our own callback to the combo widget to render an image when it changes
 		const cb = node.callback;
