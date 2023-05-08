@@ -259,6 +259,7 @@ class GroupNode {
 	 * @param {LGraphNode} node
 	 */
 	#handleInputs(node) {
+		console.log("handleInputs", node);
 		if (!node.inputs) return;
 
 		for (let i = 0; i < node.inputs.length; i++) {
@@ -389,12 +390,22 @@ class GroupNode {
 		for (const nodeData of this.flags.internalNodes) {
 			const node = LiteGraph.createNode(nodeData.type);
 			const id = nodeData.id;
+			console.log("configure from group", node);
 			node.configure({ ...nodeData });
 			node.id = ++app.graph.last_node_id;
 			node.originalId = id;
 			this.#oldToNewId[id] = node.id;
 			this.#newToOldId[node.id] = id;
 			this.#internalNodes.push(node);
+		}
+
+		for (const input of this.inputs) {
+			if (input.convertedWidget) {
+				const node = this.#internalNodes.find((n) => n.originalId === input.for.id);
+				const slot = node.inputs[input.for.slot];
+				const w = slot.getWidget();
+				input.getWidget = () => ({ ...w, name: node.title + " " + w.name });
+			}
 		}
 
 		const size = this.size;

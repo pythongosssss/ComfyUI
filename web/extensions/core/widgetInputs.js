@@ -110,14 +110,11 @@ function convertToWidget(node, widget) {
 }
 
 function getWidgetType(config) {
-	// Special handling for COMBO so we restrict links based on the entries
 	let type = config[0];
-	let linkType = type;
 	if (type instanceof Array) {
 		type = "COMBO";
-		linkType = linkType.join(",");
 	}
-	return { type, linkType };
+	return type;
 }
 
 app.registerExtension({
@@ -161,6 +158,7 @@ app.registerExtension({
 		};
 
 		function configureWidgets(node) {
+			console.log("configureWidgets", node)
 			if (node.inputs) {
 				for (const input of node.inputs) {
 					if (input.widget) {
@@ -328,8 +326,23 @@ app.registerExtension({
 
 			onConfigure() {
 				if (this.needsConnecting && !this.widgets?.length) {
-					// If we need connecting but have no widget, try again
-					this.#onFirstConnection();
+					app.addEventListener("graphConfigured", ({ detail }) => {
+						const connectPrimitives = detail.callbacks.find((c) => c.type === "connectPrimitives");
+						if (!connectPrimitives) {
+							const cb = function () {
+								console.log("callback triggered", cb.nodes);
+								for (const node of cb.nodes) {
+									node.#onFirstConnection();
+								}
+							};
+							cb.type === "connectPrimitives";
+							cb.nodes = [this];
+							cb.after = "createGroupNode"
+							detail.callbacks.push(cb);
+						} else {
+							connectPrimitives.nodes.push(this);
+						}
+					});
 				}
 			}
 
@@ -338,8 +351,11 @@ app.registerExtension({
 					if (this.outputs[0].links?.length) {
 						if (!this.widgets?.length) {
 							// Flag that we need a connection here in case it fails to get the input node at this point
-							this.needsConnecting = true;
-							this.#onFirstConnection();
+							if (app.configuringGraph) {
+								this.needsConnecting = true;
+							} else {
+								this.#onFirstConnection(this.outputs[0].links[0])
+							}
 						}
 						if (!this.widgets?.length && this.outputs[0].getWidget?.()) {
 							// On first load it often cant recreate the widget as the other node doesnt exist yet
@@ -391,12 +407,12 @@ app.registerExtension({
 				}
 
 				const widget = _widget;
-				const { type, linkType } = getWidgetType(widget.config);
+				const type = getWidgetType(widget.config);
 				// Update our output to restrict to the widget type
 				if (this.outputs[0].widget) {
 					delete this.outputs.widget;
 				}
-				this.outputs[0].type = linkType;
+				this.outputs[0].type = type;
 				this.outputs[0].name = type;
 				this.outputs[0].getWidget = () => widget;
 
