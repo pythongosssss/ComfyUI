@@ -267,6 +267,34 @@ export class ComfyApp {
 	 */
 	#addDrawBackgroundHandler(node) {
 		const app = this;
+
+		function getImageTop(node) {
+			let shiftY;
+			if (node.imageOffset != null) {
+				shiftY = node.imageOffset;
+			} else {
+				if (node.widgets?.length) {
+					const w = node.widgets[node.widgets.length - 1];
+					shiftY = w.last_y;
+					if (w.computeSize) {
+						shiftY += w.computeSize()[1] + 4;
+					} else {
+						shiftY += LiteGraph.NODE_WIDGET_HEIGHT + 4;
+					}
+				} else {
+					shiftY = node.computeSize()[1];
+				}
+			}
+			return shiftY;
+		}
+
+		node.prototype.setSizeForImage = function () {
+			const minHeight = getImageTop(this) + 220;
+			if (this.size[1] < minHeight) {
+				this.setSize([this.size[0], minHeight]);
+			}
+		};
+
 		node.prototype.onDrawBackground = function (ctx) {
 			if (!this.flags.collapsed) {
 				const output = app.nodeOutputs[this.id + ""];
@@ -287,9 +315,7 @@ export class ComfyApp {
 						).then((imgs) => {
 							if (this.images === output.images) {
 								this.imgs = imgs.filter(Boolean);
-								if (this.size[1] < 100) {
-									this.size[1] = 250;
-								}
+								this.setSizeForImage?.();
 								app.graph.setDirtyCanvas(true);
 							}
 						});
@@ -314,22 +340,7 @@ export class ComfyApp {
 						this.imageIndex = imageIndex = 0;
 					}
 
-					let shiftY;
-					if (this.imageOffset != null) {
-						shiftY = this.imageOffset;
-					} else {
-						if (this.widgets?.length) {
-							const w = this.widgets[this.widgets.length - 1];
-							shiftY = w.last_y;
-							if (w.computeSize) {
-								shiftY += w.computeSize()[1] + 4;
-							} else {
-								shiftY += LiteGraph.NODE_WIDGET_HEIGHT + 4;
-							}
-						} else {
-							shiftY = this.computeSize()[1];
-						}
-					}
+					const shiftY = getImageTop(this);
 
 					let dw = this.size[0];
 					let dh = this.size[1];
@@ -717,7 +728,7 @@ export class ComfyApp {
 				ctx.globalAlpha = 0.8;
 				ctx.beginPath();
 				if (shape == LiteGraph.BOX_SHAPE)
-					ctx.rect(-6, -6 + LiteGraph.NODE_TITLE_HEIGHT, 12 + size[0] + 1, 12 + size[1] + LiteGraph.NODE_TITLE_HEIGHT);
+					ctx.rect(-6, -6 - LiteGraph.NODE_TITLE_HEIGHT, 12 + size[0] + 1, 12 + size[1] + LiteGraph.NODE_TITLE_HEIGHT);
 				else if (shape == LiteGraph.ROUND_SHAPE || (shape == LiteGraph.CARD_SHAPE && node.flags.collapsed))
 					ctx.roundRect(
 						-6,
@@ -729,12 +740,11 @@ export class ComfyApp {
 				else if (shape == LiteGraph.CARD_SHAPE)
 					ctx.roundRect(
 						-6,
-						-6 + LiteGraph.NODE_TITLE_HEIGHT,
+						-6 - LiteGraph.NODE_TITLE_HEIGHT,
 						12 + size[0] + 1,
 						12 + size[1] + LiteGraph.NODE_TITLE_HEIGHT,
-						this.round_radius * 2,
-						2
-					);
+						[this.round_radius * 2, this.round_radius * 2, 2, 2]
+				);
 				else if (shape == LiteGraph.CIRCLE_SHAPE)
 					ctx.arc(size[0] * 0.5, size[1] * 0.5, size[0] * 0.5 + 6, 0, Math.PI * 2);
 				ctx.strokeStyle = color;

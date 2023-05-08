@@ -105,15 +105,13 @@ class ConditioningSetArea:
 
     CATEGORY = "conditioning"
 
-    def append(self, conditioning, width, height, x, y, strength, min_sigma=0.0, max_sigma=99.0):
+    def append(self, conditioning, width, height, x, y, strength):
         c = []
         for t in conditioning:
             n = [t[0], t[1].copy()]
             n[1]['area'] = (height // 8, width // 8, y // 8, x // 8)
             n[1]['strength'] = strength
             n[1]['set_area_to_bounds'] = False
-            n[1]['min_sigma'] = min_sigma
-            n[1]['max_sigma'] = max_sigma
             c.append(n)
         return (c, )
 
@@ -816,8 +814,8 @@ def common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, 
         noise_mask = latent["noise_mask"]
 
     pbar = comfy.utils.ProgressBar(steps)
-    def callback(step, x0, x):
-        pbar.update_absolute(step + 1)
+    def callback(step, x0, x, total_steps):
+        pbar.update_absolute(step + 1, total_steps)
 
     samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                                   denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
