@@ -151,6 +151,7 @@ class PromptServer():
                 i = 1
                 while os.path.exists(filepath):
                     filename = f"{split[0]} ({i}){split[1]}"
+                    filepath = os.path.join(full_output_folder, filename)
                     i += 1
 
                 if image_save_function is not None:
@@ -179,7 +180,7 @@ class PromptServer():
                 # alpha copy
                 new_alpha = mask_pil.getchannel('A')
                 original_pil.putalpha(new_alpha)
-                original_pil.save(filepath)
+                original_pil.save(filepath, compress_level=4)
 
             return image_upload(post, image_save_function)
 
@@ -312,7 +313,7 @@ class PromptServer():
                 if "client_id" in json_data:
                     extra_data["client_id"] = json_data["client_id"]
                 if valid[0]:
-                    self.prompt_queue.put((number, id(prompt), prompt, extra_data))
+                    self.prompt_queue.put((number, id(prompt), prompt, extra_data, valid[2]))
                 else:
                     resp_code = 400
                     out_string = valid[1]
