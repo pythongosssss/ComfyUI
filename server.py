@@ -115,22 +115,23 @@ class PromptServer():
 
         def get_dir_by_type(dir_type):
             if dir_type is None:
-                type_dir = folder_paths.get_input_directory()
-            elif dir_type == "input":
+                dir_type = "input"
+
+            if dir_type == "input":
                 type_dir = folder_paths.get_input_directory()
             elif dir_type == "temp":
                 type_dir = folder_paths.get_temp_directory()
             elif dir_type == "output":
                 type_dir = folder_paths.get_output_directory()
 
-            return type_dir
+            return type_dir, dir_type
 
         def image_upload(post, image_save_function=None):
             image = post.get("image")
             overwrite = post.get("overwrite")
 
             image_upload_type = post.get("type")
-            upload_dir = get_dir_by_type(image_upload_type)
+            upload_dir, image_upload_type = get_dir_by_type(image_upload_type)
 
             if image and image.file:
                 filename = image.filename
@@ -268,6 +269,7 @@ class PromptServer():
                 info = {}
                 info['input'] = obj_class.INPUT_TYPES()
                 info['output'] = obj_class.RETURN_TYPES
+                info['output_is_list'] = obj_class.OUTPUT_IS_LIST if hasattr(obj_class, 'OUTPUT_IS_LIST') else [False] * len(obj_class.RETURN_TYPES)
                 info['output_name'] = obj_class.RETURN_NAMES if hasattr(obj_class, 'RETURN_NAMES') else info['output']
                 info['name'] = x
                 info['display_name'] = nodes.NODE_DISPLAY_NAME_MAPPINGS[x] if x in nodes.NODE_DISPLAY_NAME_MAPPINGS.keys() else x
@@ -321,12 +323,11 @@ class PromptServer():
                     self.prompt_queue.put((number, prompt_id, prompt, extra_data, valid[2]))
                     return web.json_response({"prompt_id": prompt_id})
                 else:
-                    resp_code = 400
-                    out_string = valid[1]
                     print("invalid prompt:", valid[1])
+                    return web.json_response({"error": valid[1]}, status=400)
+            else:
+                return web.json_response({"error": "no prompt"}, status=400)
 
-            return web.Response(body=out_string, status=resp_code)
-        
         @routes.post("/queue")
         async def post_queue(request):
             json_data =  await request.json()
@@ -336,9 +337,9 @@ class PromptServer():
             if "delete" in json_data:
                 to_delete = json_data['delete']
                 for id_to_delete in to_delete:
-                    delete_func = lambda a: a[1] == int(id_to_delete)
+                    delete_func = lambda a: a[1] == id_to_delete
                     self.prompt_queue.delete_queue_item(delete_func)
-                    
+
             return web.Response(status=200)
 
         @routes.post("/interrupt")
@@ -362,7 +363,7 @@ class PromptServer():
     def add_routes(self):
         self.app.add_routes(self.routes)
         self.app.add_routes([
-            web.static('/', self.web_root),
+            web.static('/', self.web_root, follow_symlinks=True),
         ])
 
     def get_queue_info(self):
