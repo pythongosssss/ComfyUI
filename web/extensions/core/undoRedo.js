@@ -121,6 +121,10 @@ window.addEventListener(
 
 			// If our active element is some type of input then handle changes after they're done
 			if (bindInput(activeEl)) return;
+
+			// Ignore modifier keys
+			if(e.key === "Control" || e.key === "Shift" || e.key === "Alt" || e.key === "Meta") return;
+			
 			checkState();
 		});
 	},
