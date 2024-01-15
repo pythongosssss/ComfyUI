@@ -5650,6 +5650,48 @@ LGraphNode.prototype.executeAction = function(action)
             false
         );
 
+        let dist1
+        this.touchCount = 0;
+        canvas.addEventListener("touchstart", (e) => {
+            this.touchCount++;
+            if(e.touches?.length === 2) {
+                dist1 = Math.hypot( //get rough estimate of distance between two fingers
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY);
+                this.pointer_is_down = false;
+            }
+        }, true);
+
+        canvas.addEventListener("touchend", (e) => {
+            this.touchCount--;
+            this.touchZooming = false;
+        });
+        canvas.addEventListener("touchmove", (e) => {
+            if(e.touches?.length === 2) {
+                this.pointer_is_down = false;
+                this.touchZooming = true;
+                LiteGraph.closeAllContextMenus();
+                this.search_box?.close();
+                var dist2 = Math.hypot(//get rough estimate of new distance between fingers
+                e.touches[0].pageX - e.touches[1].pageX,
+                e.touches[0].pageY - e.touches[1].pageY);
+
+                const midX = (e.touches[0].pageX + e.touches[1].pageX) / 2;
+                const midY = (e.touches[0].pageY + e.touches[1].pageY) / 2;
+                
+                let scale = this.ds.scale;
+                const diff = dist1 - dist2;
+                if (diff > 0.5) {
+                    scale *= 1 / 1.1;
+                } else if (diff < -0.5) {
+                    scale *= 1.1;
+                }
+                this.ds.changeScale(scale, [midX, midY]);
+                this.setDirty(true, true);
+                dist1 = dist2;
+            }
+        }, true);
+
         //touch events -- THIS WAY DOES NOT WORK, finish implementing pointerevents, than clean the touchevents
         /*if( 'touchstart' in document.documentElement )
         {
@@ -5842,11 +5884,10 @@ LGraphNode.prototype.executeAction = function(action)
 	}
 	
     LGraphCanvas.prototype.processMouseDown = function(e) {
-    	
 		if( this.set_canvas_dirty_on_mouse_event )
 			this.dirty_canvas = true;
 		
-		if (!this.graph) {
+		if (!this.graph || this.touchZooming || this.touchCount) {
             return;
         }
 
@@ -6344,7 +6385,7 @@ LGraphNode.prototype.executeAction = function(action)
 		if( this.set_canvas_dirty_on_mouse_event )
 			this.dirty_canvas = true;
 
-        if (!this.graph) {
+        if (!this.graph || this.touchZooming) {
             return;
         }
 
