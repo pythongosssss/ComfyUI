@@ -5652,21 +5652,47 @@ LGraphNode.prototype.executeAction = function(action)
 
         let dist1
         this.touchCount = 0;
+        let touchHold;
+        let lastTouch;
         canvas.addEventListener("touchstart", (e) => {
             this.touchCount++;
-            if(e.touches?.length === 2) {
-                dist1 = Math.hypot( //get rough estimate of distance between two fingers
-                    e.touches[0].pageX - e.touches[1].pageX,
-                    e.touches[0].pageY - e.touches[1].pageY);
-                this.pointer_is_down = false;
+            lastTouch = null;
+            if(e.touches?.length === 1) { 
+                touchHold = new Date();
+                lastTouch = e.touches[0];
+            } else {
+                touchHold = null;
+                if(e.touches?.length === 2) {
+                    dist1 = Math.hypot(
+                        e.touches[0].pageX - e.touches[1].pageX,
+                        e.touches[0].pageY - e.touches[1].pageY);
+                    this.pointer_is_down = false;
+                }
             }
         }, true);
 
         canvas.addEventListener("touchend", (e) => {
-            this.touchCount--;
             this.touchZooming = false;
+            this.touchCount = e.touches?.length ?? (this.touchCount - 1);
+            if (touchHold && !e.touches?.length) {
+                if (new Date() - touchHold > 600) {
+                    this.pointer_is_down = true;
+                    e.clientX = lastTouch.clientX;
+                    e.clientY = lastTouch.clientY;
+                    var log = "";
+                    var p = new Proxy(e, {
+                        get(target, p, r) {
+                            log += p + ": " + e[p] + "\n";
+                            return e[p];
+                        }
+                    });
+                    this._mousedown_callback(p);
+                }
+                touchHold = null;
+            }
         });
         canvas.addEventListener("touchmove", (e) => {
+            touchHold = null;
             if(e.touches?.length === 2) {
                 this.pointer_is_down = false;
                 this.touchZooming = true;
@@ -13712,7 +13738,8 @@ LGraphNode.prototype.executeAction = function(action)
 			eventClass = options.event.constructor.name;
         if ( eventClass !== "MouseEvent" &&
             eventClass !== "CustomEvent" &&
-			eventClass !== "PointerEvent"
+			eventClass !== "PointerEvent" &&
+			eventClass !== "TouchEvent"
         ) {
             console.error(
                 "Event passed to ContextMenu is not of type MouseEvent or CustomEvent. Ignoring it. ("+eventClass+")"
