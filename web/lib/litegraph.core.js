@@ -5679,14 +5679,7 @@ LGraphNode.prototype.executeAction = function(action)
                     this.pointer_is_down = true;
                     e.clientX = lastTouch.clientX;
                     e.clientY = lastTouch.clientY;
-                    var log = "";
-                    var p = new Proxy(e, {
-                        get(target, p, r) {
-                            log += p + ": " + e[p] + "\n";
-                            return e[p];
-                        }
-                    });
-                    this._mousedown_callback(p);
+                    this._mousedown_callback(e);
                 }
                 touchHold = null;
             }
