@@ -5664,8 +5664,8 @@ LGraphNode.prototype.executeAction = function(action)
                 touchHold = null;
                 if(e.touches?.length === 2) {
                     dist1 = Math.hypot(
-                        e.touches[0].pageX - e.touches[1].pageX,
-                        e.touches[0].pageY - e.touches[1].pageY);
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY);
                     this.pointer_is_down = false;
                 }
             }
@@ -5692,11 +5692,11 @@ LGraphNode.prototype.executeAction = function(action)
                 LiteGraph.closeAllContextMenus();
                 this.search_box?.close();
                 var dist2 = Math.hypot(//get rough estimate of new distance between fingers
-                e.touches[0].pageX - e.touches[1].pageX,
-                e.touches[0].pageY - e.touches[1].pageY);
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY);
 
-                const midX = (e.touches[0].pageX + e.touches[1].pageX) / 2;
-                const midY = (e.touches[0].pageY + e.touches[1].pageY) / 2;
+                const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                 
                 let scale = this.ds.scale;
                 const diff = dist1 - dist2;
@@ -6404,7 +6404,7 @@ LGraphNode.prototype.executeAction = function(action)
 		if( this.set_canvas_dirty_on_mouse_event )
 			this.dirty_canvas = true;
 
-        if (!this.graph || this.touchZooming) {
+        if (!this.graph || this.touchZooming || this.touchCount > 1) {
             return;
         }
 
