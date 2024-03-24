@@ -619,7 +619,9 @@ app.registerExtension({
 					widget = this.addWidget(type, "value", null, () => {}, {});
 				}
 
-				if (targetWidget) {
+				if(!recreating && this.widgets_values?.length) {
+					widget.value = this.widgets_values[0];
+				} else if (targetWidget) {
 					widget.value = targetWidget.value;
 				} else if (node?.widgets && widget) {
 					const theirWidget = node.widgets.find((w) => w.name === widgetName);
