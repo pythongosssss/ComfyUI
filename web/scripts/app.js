@@ -1554,7 +1554,9 @@ export class ComfyApp {
 		mainCanvas.style.touchAction = "none"
 		const canvasEl = (this.canvasEl = Object.assign(mainCanvas, { id: "graph-canvas" }));
 		canvasEl.tabIndex = "1";
-		document.body.append(canvasEl);
+		const canvasWrapper = $el("div.comfyui-canvas-wrapper");
+		canvasWrapper.append(canvasEl);
+		document.body.append(canvasWrapper);
 		this.resizeCanvas();
 
 		await Promise.all([this.workflowManager.loadWorkflows(), this.ui.settings.load()]);
@@ -1642,8 +1644,8 @@ export class ComfyApp {
 		// Clear fixed width and height while calculating rect so it uses 100% instead
 		this.canvasEl.height = this.canvasEl.width = "";
 		const { width, height } = this.canvasEl.getBoundingClientRect();
-		this.canvasEl.width = Math.round(width * scale);
-		this.canvasEl.height = Math.round(height * scale);
+		this.canvasEl.width = Math.min(window.innerWidth, Math.round(width * scale));
+		this.canvasEl.height =  Math.min(window.innerHeight, Math.round(height * scale));
 		this.canvasEl.getContext("2d").scale(scale, scale);
 		this.canvas?.draw(true, true);
 	}

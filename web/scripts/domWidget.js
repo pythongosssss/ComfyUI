@@ -207,9 +207,6 @@ export function addDomClippingSetting() {
 LGraphNode.prototype.addDOMWidget = function (name, type, element, options) {
 	options = { hideOnZoom: true, selectOn: ["focus", "click"], ...options };
 
-	if (!element.parentElement) {
-		document.body.append(element);
-	}
 	element.hidden = true;
 	element.style.display = "none";
 	
@@ -234,6 +231,10 @@ LGraphNode.prototype.addDOMWidget = function (name, type, element, options) {
 			widget.callback?.(widget.value);
 		},
 		draw: function (ctx, node, widgetWidth, y, widgetHeight) {
+			if (!element.parentElement) {
+				node.canvasEl.parentElement.append(element);
+			}
+
 			if (widget.computedHeight == null) {
 				computeSize.call(node, node.size);
 			}
@@ -242,7 +243,7 @@ LGraphNode.prototype.addDOMWidget = function (name, type, element, options) {
 				node.flags?.collapsed ||
 				(!!options.hideOnZoom && app.canvas.ds.scale < 0.5) ||
 				widget.computedHeight <= 0 ||
-				widget.type === "converted-widget"||
+				widget.type === "converted-widget" ||
 				widget.type === "hidden";
 			element.hidden = hidden;
 			element.style.display = hidden ? "none" : null;
@@ -252,23 +253,22 @@ LGraphNode.prototype.addDOMWidget = function (name, type, element, options) {
 			}
 
 			const margin = 10;
-			const elRect = ctx.canvas.getBoundingClientRect();
+			const elRect = app.canvasEl.getBoundingClientRect();
 			const transform = new DOMMatrix()
-				.scaleSelf(elRect.width / ctx.canvas.width, elRect.height / ctx.canvas.height)
+				.scaleSelf(elRect.width / app.canvasEl.width, elRect.height / app.canvasEl.height)
 				.multiplySelf(ctx.getTransform())
-				.translateSelf(margin, margin + y );
-
+				.translateSelf(margin + parseInt(node.canvasEl.style.left), margin + y + parseInt(node.canvasEl.style.top));
 			const scale = new DOMMatrix().scaleSelf(transform.a, transform.d);
 
 			Object.assign(element.style, {
 				transformOrigin: "0 0",
 				transform: scale,
-				left: `${transform.a + transform.e + elRect.left}px`,
-				top: `${transform.d + transform.f + elRect.top}px`,
+				left: `${parseInt(node.canvasEl.style.left) + (margin * app.canvas.ds.scale)}px`,
+				top: `${parseInt(node.canvasEl.style.top) + (y + LiteGraph.NODE_TITLE_HEIGHT) * app.canvas.ds.scale}px`,
 				width: `${widgetWidth - margin * 2}px`,
 				height: `${(widget.computedHeight ?? 50) - margin * 2}px`,
 				position: "absolute",
-				zIndex: app.graph._nodes.indexOf(node),
+				zIndex: +node.canvasEl.style.zIndex + 1,
 			});
 
 			if (enableDomClipping) {

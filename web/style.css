@@ -62,12 +62,28 @@ body {
 	display: flex;
 }
 
-#graph-canvas {
+#graph-canvas,
+.comfyui-canvas-wrapper {
 	width: 100%;
 	height: 100%;
 	order: -3;
 }
 
+#graph-canvas {
+	pointer-events: none;
+}
+
+.comfyui-canvas-wrapper {
+	position: relative;
+}
+
+.comfyui-canvas-wrapper canvas {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+}
 .comfyui-body-right {
 	order: -2;
 	z-index: 10;

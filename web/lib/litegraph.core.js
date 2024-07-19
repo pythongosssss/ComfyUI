@@ -1553,6 +1553,9 @@
         if (this.onNodeRemoved) {
             this.onNodeRemoved(node);
         }
+        if(node.canvasEl) {
+            node.canvasEl.remove();
+        }
 
 		//close panels
 		this.sendActionToCanvas("checkPanels");
@@ -5569,8 +5572,10 @@ LGraphNode.prototype.executeAction = function(action)
         this.bgcanvas = null;
         if (!this.bgcanvas) {
             this.bgcanvas = document.createElement("canvas");
+            this.bgcanvas.style.zIndex = -1;
             this.bgcanvas.width = this.canvas.width;
             this.bgcanvas.height = this.canvas.height;
+            this.canvas.after(this.bgcanvas);
         }
 
         if (canvas.getContext == null) {
@@ -5623,7 +5628,7 @@ LGraphNode.prototype.executeAction = function(action)
 
         //console.log("pointerevents: bindEvents");
         
-        var canvas = this.canvas;
+        var canvas = this.canvas.parentElement;
 
         var ref_window = this.getCanvasWindow();
         var document = ref_window.document; //hack used when moving canvas between windows
@@ -5842,6 +5847,9 @@ LGraphNode.prototype.executeAction = function(action)
 	}
 	
     LGraphCanvas.prototype.processMouseDown = function(e) {
+        if(e.target !== this.canvas.parentElement && !e.target.dataset.nodeId) {
+            return;
+        }
     	
 		if( this.set_canvas_dirty_on_mouse_event )
 			this.dirty_canvas = true;
@@ -5959,7 +5967,7 @@ LGraphNode.prototype.executeAction = function(action)
                     ) {
 						this.graph.beforeChange();
                         this.resizing_node = node;
-                        this.canvas.style.cursor = "se-resize";
+                        this.canvas.parentElement.style.cursor = "se-resize";
                         skip_action = true;
                     } else {
                         //search for outputs
@@ -6505,9 +6513,9 @@ LGraphNode.prototype.executeAction = function(action)
                 //Search for corner
                 if (this.canvas) {
                     if (node.inResizeCorner(e.canvasX, e.canvasY)) {
-                        this.canvas.style.cursor = "se-resize";
+                        this.canvas.parentElement.style.cursor = "se-resize";
                     } else {
-                        this.canvas.style.cursor = "crosshair";
+                        this.canvas.parentElement.style.cursor = "crosshair";
                     }
                 }
             } else { //not over a node
@@ -6536,7 +6544,7 @@ LGraphNode.prototype.executeAction = function(action)
 				}
 
 				if (this.canvas) {
-	                this.canvas.style.cursor = "";
+	                this.canvas.parentElement.style.cursor = "";
 				}
 			} //end
 
@@ -6570,7 +6578,7 @@ LGraphNode.prototype.executeAction = function(action)
 				desired_size[1] = Math.max( min_size[1], desired_size[1] );
 				this.resizing_node.setSize( desired_size );
 
-                this.canvas.style.cursor = "se-resize";
+                this.canvas.parentElement.style.cursor = "se-resize";
                 this.dirty_canvas = true;
                 this.dirty_bgcanvas = true;
             }
@@ -7789,9 +7797,9 @@ LGraphNode.prototype.executeAction = function(action)
 
         //draw bg canvas
         if (this.bgcanvas == this.canvas) {
-            this.drawBackCanvas();
+            // this.drawBackCanvas();
         } else {
-            ctx.drawImage( this.bgcanvas, 0, 0 );
+            // ctx.drawImage( this.bgcanvas, 0, 0 );
         }
 
         //rendering
@@ -7816,12 +7824,28 @@ LGraphNode.prototype.executeAction = function(action)
                 this.visible_nodes
             );
 
+            this.canvas.style.zIndex = (visible_nodes.length + 1) * 2;
             for (var i = 0; i < visible_nodes.length; ++i) {
                 var node = visible_nodes[i];
 
+                if(!node.canvasEl) {
+                    node.canvasEl = document.createElement("canvas");
+                    node.canvasEl.dataset.nodeId = node.id;
+                    this.canvas.after(node.canvasEl);
+                }
+
+                const ctx = node.canvasEl.getContext("2d");
+                node.canvasEl.style.zIndex = (i + 1) * 2;
+                node.canvasEl.width = this.ds.scale * node.size[0];
+                node.canvasEl.height = this.ds.scale * node.size[1] + LiteGraph.NODE_TITLE_HEIGHT;
+                node.canvasEl.style.position = "absolute";
+                node.canvasEl.style.left = this.ds.scale * (this.ds.offset[0] + node.pos[0]) + "px";
+                node.canvasEl.style.top = this.ds.scale * (this.ds.offset[1] + node.pos[1] - LiteGraph.NODE_TITLE_HEIGHT) + "px";
+
                 //transform coords system
                 ctx.save();
-                ctx.translate(node.pos[0], node.pos[1]);
+                ctx.scale(this.ds.scale, this.ds.scale);
+                ctx.translate(0,  LiteGraph.NODE_TITLE_HEIGHT);
 
                 //Draw
                 this.drawNode(node, ctx);
