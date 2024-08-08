@@ -80,10 +80,11 @@
         RIGHT: 4,
         CENTER: 5,
 
-        LINK_RENDER_MODES: ["Straight", "Linear", "Spline"], // helper
+        LINK_RENDER_MODES: ["Straight", "Linear", "Spline", "SEGMENT"], // helper
         STRAIGHT_LINK: 0,
         LINEAR_LINK: 1,
         SPLINE_LINK: 2,
+        SEGMENT_LINK: 3,
 
         NORMAL_TITLE: 0,
         NO_TITLE: 1,
@@ -2326,6 +2327,7 @@
             this.target_id = o[3];
             this.target_slot = o[4];
             this.type = o[5];
+            this.points = o[6]?.points;
         } else {
             this.id = o.id;
             this.type = o.type;
@@ -2333,6 +2335,7 @@
             this.origin_slot = o.origin_slot;
             this.target_id = o.target_id;
             this.target_slot = o.target_slot;
+            this.points = o._points;
         }
     };
 
@@ -2343,7 +2346,8 @@
             this.origin_slot,
             this.target_id,
             this.target_slot,
-            this.type
+            this.type,
+            { points: this.points }
         ];
     };
 
@@ -5842,7 +5846,8 @@ LGraphNode.prototype.executeAction = function(action)
 	}
 	
     LGraphCanvas.prototype.processMouseDown = function(e) {
-    	
+    	this.show_link_menu = null;
+
 		if( this.set_canvas_dirty_on_mouse_event )
 			this.dirty_canvas = true;
 		
@@ -5888,6 +5893,8 @@ LGraphNode.prototype.executeAction = function(action)
         this.graph_mouse[0] = e.canvasX;
         this.graph_mouse[1] = e.canvasY;
 		this.last_click_position = [this.mouse[0],this.mouse[1]];
+		this.graph_last_click_position = [e.canvasX, e.canvasY];
+        
 	  	
 	  	if (this.pointer_is_down && is_primary ){
 		  this.pointer_is_double = true;
@@ -6166,7 +6173,7 @@ LGraphNode.prototype.executeAction = function(action)
 								continue;
 							}
 							//link clicked
-							this.showLinkMenu(link, e);
+                            this.show_link_menu = link;
 							this.over_link_center = null; //clear tooltip
 							break;
 						}
@@ -6198,8 +6205,15 @@ LGraphNode.prototype.executeAction = function(action)
             }
 
             if (!skip_action && clicking_canvas_bg && this.allow_dragcanvas) {
+                if(this.over_link_line) {
+                    this.down_link_line = this.over_link_line;
+                    this.dragging_canvas = false;
+                    this.dirty_bgcanvas = true;
+                } else {
+                    this.down_link_line = false;
+            	    this.dragging_canvas = true;
+                }
             	//console.log("pointerevents: dragging_canvas start");
-            	this.dragging_canvas = true;
             }
             
         } else if (e.which == 2) {
@@ -6385,7 +6399,27 @@ LGraphNode.prototype.executeAction = function(action)
         //get node over
         var node = this.graph.getNodeOnPos(e.canvasX,e.canvasY,this.visible_nodes);
 
-        if (this.dragging_rectangle)
+        if(this.show_link_menu && !node) {
+            node = this.graph.getNodeById(this.show_link_menu.origin_id)
+            var toNode = this.graph.getNodeById(this.show_link_menu.target_id)
+            
+            var originPos = node.getConnectionPos(false, this.show_link_menu.origin_slot);
+            var targetPos = toNode.getConnectionPos(true, this.show_link_menu.target_slot);
+
+            this.connecting_node = node;
+            this.connecting_output = node.outputs[this.show_link_menu.origin_slot];
+            this.connecting_output.slot_index = this.show_link_menu.origin_slot;
+            this.connecting_pos = [(targetPos[0] + originPos[0]) / 2, (targetPos[1] + originPos[1]) / 2]
+            this.connecting_slot = this.show_link_menu.origin_slot;
+            this.connecting_midpoint = true;
+            this.dragging_canvas = false;
+            this.show_link_menu = null;
+        }
+
+        if(this.down_link_line) {
+            this.dirty_bgcanvas = true;
+        }
+        else if (this.dragging_rectangle)
 		{
             this.dragging_rectangle[2] = e.canvasX - this.dragging_rectangle[0];
             this.dragging_rectangle[3] = e.canvasY - this.dragging_rectangle[1];
@@ -6514,6 +6548,9 @@ LGraphNode.prototype.executeAction = function(action)
 
                 //search for link connector
 				var over_link = null;
+                this.over_link_line = null;
+                let lineWidth = this.ctx.lineWidth;
+                this.ctx.lineWidth = 8;
 				for (var i = 0; i < this.visible_links.length; ++i) {
 					var link = this.visible_links[i];
 					var center = link._pos;
@@ -6524,18 +6561,46 @@ LGraphNode.prototype.executeAction = function(action)
 						e.canvasY < center[1] - 4 ||
 						e.canvasY > center[1] + 4
 					) {
+                        if(link._spots) {
+                            for(const path of link._spots) {
+                                const over = this.ctx.isPointInStroke(path, e.canvasX, e.canvasY);
+                                this.over_link_spot = over;
+                                if(over) {
+                                    over_link = link;
+                                    break;
+                                }
+                            }
+                            if(over_link) break;
+                        }
+
+                        if(link._paths) {
+                            var x = 0;
+                            for(const path of link._paths) {
+                            const over = this.ctx.isPointInStroke(path, e.canvasX, e.canvasY);
+                            if(over) {
+                                this.canvas.style.cursor = "grab";
+                                this.over_link_line = link;
+                                this.over_link_path = path;
+                                this.over_link_index = x;
+                                this.dirty_canvas = true;
+                            }
+                            x++;
+                        }
+                        }
 						continue;
 					}
 					over_link = link;
 					break;
 				}
+                this.ctx.lineWidth = lineWidth;
+
 				if( over_link != this.over_link_center )
 				{
 					this.over_link_center = over_link;
 	                this.dirty_canvas = true;
 				}
 
-				if (this.canvas) {
+				if (this.canvas && !this.over_link_line) {
 	                this.canvas.style.cursor = "";
 				}
 			} //end
@@ -6587,6 +6652,21 @@ LGraphNode.prototype.executeAction = function(action)
     LGraphCanvas.prototype.processMouseUp = function(e) {
 
 		var is_primary = ( e.isPrimary === undefined || e.isPrimary );
+        this.over_link_line = null;
+        this.over_link_path = null;
+        if(this.down_link_line) {
+            if(!this.down_link_line.points) {
+                this.down_link_line.points = []
+            }
+
+            this.down_link_line.points.splice(this.over_link_index - 1, 0, [...this.canvas_mouse]);
+            console.log(this.down_link_line.points)
+            this.down_link_line = null;
+        }
+        this.over_link_index = null;
+        if(this.canvas.style.cursor === "grab") {
+            this.canvas.style.cursor = "";
+        }
 
     	//early exit for extra pointer
     	if(!is_primary){
@@ -6622,6 +6702,12 @@ LGraphNode.prototype.executeAction = function(action)
         e.click_time = now - this.last_mouseclick;
         this.last_mouse_dragging = false;
 		this.last_click_position = null;
+
+        if(this.show_link_menu) {
+            this.showLinkMenu(this.show_link_menu, e);
+            this.show_link_menu = null;
+            return;
+        }
 
 		if(this.block_click)
 		{
@@ -7879,7 +7965,8 @@ LGraphNode.prototype.executeAction = function(action)
                     null,
                     link_color,
                     connDir,
-                    LiteGraph.CENTER
+                    LiteGraph.CENTER,
+                    undefined,
                 );
 
                 ctx.beginPath();
@@ -9403,8 +9490,9 @@ LGraphNode.prototype.executeAction = function(action)
         color,
         start_dir,
         end_dir,
-        num_sublines
+        num_sublines,
     ) {
+        console.log("Render")
         if (link) {
             this.visible_links.push(link);
         }
@@ -9435,12 +9523,17 @@ LGraphNode.prototype.executeAction = function(action)
         }
 
         //begin line shape
-        ctx.beginPath();
+        let path = new Path2D()
+        let paths = [path]
+        if(link) {
+            link._paths = paths;
+        }
+        
         for (var i = 0; i < num_sublines; i += 1) {
             var offsety = (i - (num_sublines - 1) * 0.5) * 5;
-
+        
             if (this.links_render_mode == LiteGraph.SPLINE_LINK) {
-                ctx.moveTo(a[0], a[1] + offsety);
+                path.moveTo(a[0], a[1] + offsety);
                 var start_offset_x = 0;
                 var start_offset_y = 0;
                 var end_offset_x = 0;
@@ -9473,7 +9566,7 @@ LGraphNode.prototype.executeAction = function(action)
                         end_offset_y = dist * 0.25;
                         break;
                 }
-                ctx.bezierCurveTo(
+                path.bezierCurveTo(
                     a[0] + start_offset_x,
                     a[1] + start_offset_y + offsety,
                     b[0] + end_offset_x,
@@ -9482,7 +9575,7 @@ LGraphNode.prototype.executeAction = function(action)
                     b[1] + offsety
                 );
             } else if (this.links_render_mode == LiteGraph.LINEAR_LINK) {
-                ctx.moveTo(a[0], a[1] + offsety);
+                path.moveTo(a[0], a[1] + offsety);
                 var start_offset_x = 0;
                 var start_offset_y = 0;
                 var end_offset_x = 0;
@@ -9515,18 +9608,18 @@ LGraphNode.prototype.executeAction = function(action)
                         end_offset_y = 1;
                         break;
                 }
-                var l = 15;
-                ctx.lineTo(
+                var l = midpoint ? 0 : 15;
+                path.lineTo(
                     a[0] + start_offset_x * l,
                     a[1] + start_offset_y * l + offsety
                 );
-                ctx.lineTo(
+                path.lineTo(
                     b[0] + end_offset_x * l,
                     b[1] + end_offset_y * l + offsety
                 );
-                ctx.lineTo(b[0], b[1] + offsety);
+                path.lineTo(b[0], b[1] + offsety);
             } else if (this.links_render_mode == LiteGraph.STRAIGHT_LINK) {
-                ctx.moveTo(a[0], a[1]);
+                path.moveTo(a[0], a[1]);
                 var start_x = a[0];
                 var start_y = a[1];
                 var end_x = b[0];
@@ -9541,11 +9634,84 @@ LGraphNode.prototype.executeAction = function(action)
                 } else {
                     end_y -= 10;
                 }
-                ctx.lineTo(start_x, start_y);
-                ctx.lineTo((start_x + end_x) * 0.5, start_y);
-                ctx.lineTo((start_x + end_x) * 0.5, end_y);
-                ctx.lineTo(end_x, end_y);
-                ctx.lineTo(b[0], b[1]);
+
+                let via;
+                let mouseStartPosition = this.canvas_mouse_down;
+                if(link && this.down_link_line) {
+                    via = this.canvas_mouse;
+                }
+
+                path.lineTo(start_x, start_y);
+                if(via) path.lineTo(via[0], via[1]);
+                path.lineTo((start_x + end_x) * 0.5, start_y);
+                path.lineTo((start_x + end_x) * 0.5, end_y);
+                path.lineTo(end_x, end_y);
+                path.lineTo(b[0], b[1]);
+            } else if(this.links_render_mode == LiteGraph.SEGMENT_LINK) {
+                path.moveTo(a[0], a[1]);
+                var start_x = a[0];
+                var start_y = a[1];
+                var end_x = b[0];
+                var end_y = b[1];
+                if (start_dir == LiteGraph.RIGHT) {
+                    start_x += 10;
+                }
+                if (end_dir == LiteGraph.LEFT) {
+                    end_x -= 10;
+                }
+
+                if(link?.points) {
+                    path.lineTo(start_x, start_y);
+                    path = new Path2D()
+                    paths.push(path);
+                    path.moveTo(start_x, start_y);
+
+                    let index = 0;
+                    if(this.over_link_line === link) {
+                        index = this.over_link_index - 1;
+                        for(let i = 0; i < index; i++) {
+                            const p = link.points[i];
+                            path.lineTo(...p);
+                            path = new Path2D()
+                            paths.push(path);
+                            path.moveTo(...p);
+                        }
+                    }
+
+                    let via;
+                    if(link && this.down_link_line) {
+                        via = this.canvas_mouse;
+                    }
+                    if(via) {
+                        path.lineTo(via[0], via[1]);
+                        path = new Path2D()
+                        paths.push(path);
+                        path.moveTo(...via);
+                    }
+
+                    for(let i = index; i < link.points.length; i++) {
+                        const p = link.points[i];
+                        if(!p) continue;
+                        path.lineTo(...p);
+                        path = new Path2D()
+                        paths.push(path);
+                        path.moveTo(...p);
+                    }
+                    
+                    path.lineTo(end_x, end_y);
+                    path.lineTo(b[0], b[1]);
+                } else {
+                    path.lineTo(start_x, start_y);
+
+                    let via;
+                    if(link && this.down_link_line) {
+                        via = this.canvas_mouse;
+                    }
+                    if(via) path.lineTo(via[0], via[1]);
+
+                    path.lineTo(end_x, end_y);
+                    path.lineTo(b[0], b[1]);
+                }
             } else {
                 return;
             } //unknown
@@ -9558,12 +9724,16 @@ LGraphNode.prototype.executeAction = function(action)
             !skip_border
         ) {
             ctx.strokeStyle = "rgba(0,0,0,0.5)";
-            ctx.stroke();
+            for(const p of paths) {
+                ctx.stroke(p);
+            }
         }
 
         ctx.lineWidth = this.connections_width;
         ctx.fillStyle = ctx.strokeStyle = color;
-        ctx.stroke();
+        for(const p of paths) {
+            ctx.stroke(p);
+        }
         //end line shape
 
         var pos = this.computeConnectionPoint(a, b, 0.5, start_dir, end_dir);
@@ -9642,9 +9812,26 @@ LGraphNode.prototype.executeAction = function(action)
             }
 
             //circle
-            ctx.beginPath();
-            ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
-            ctx.fill();
+            delete link._spots;
+            if(this.links_render_mode == LiteGraph.SEGMENT_LINK) {
+                if(link?.points || this.down_link_line === link) {
+                    link._spots = [];
+                    for(const p of link.points ?? []) {
+                        const path = new Path2D()
+                        link._spots.push(path);
+                        path.arc(p[0], p[1], 5, 0, Math.PI * 2);
+                        ctx.fill(path);
+                    }
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else {
+                ctx.beginPath();
+                ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
 
         //render flowing points
